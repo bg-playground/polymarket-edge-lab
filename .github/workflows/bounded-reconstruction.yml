@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - bounded-reconstruction-nagi777
+      - empirical-pair-sensitivity-latency
   workflow_dispatch:
 
 permissions:
@@ -71,6 +72,16 @@ jobs:
             --output-dir reports/bounded-claim-grade \
             | tee evidence/bounded_pair_claim.log
 
+      - name: Analyze accounting sensitivity and pair latency
+        run: |
+          python scripts/analyze_pair_sensitivity.py \
+            --account 0xbf337426aa856996b8bb79b238345dd1a0276bf7 \
+            --duckdb-path data/bounded.duckdb \
+            --collection-start ${{ steps.bounds.outputs.start }} \
+            --collection-end ${{ steps.bounds.outputs.end }} \
+            --output-dir reports/pair-sensitivity \
+            | tee evidence/pair_sensitivity.log
+
       - name: Mechanical accounting smoke test with explicit completeness assumption
         run: |
           python scripts/reconstruct_trader.py \
@@ -92,10 +103,10 @@ jobs:
 
           - Data collection is maker-inclusive and time-window bounded.
           - \`reports/incomplete-safe\` deliberately leaves general market-history completeness unresolved.
-          - \`reports/bounded-claim-grade\` treats only observed \`btc-updown-5m-<epoch>\` markets whose complete five-minute interval lies inside the collection interval as complete. Its pair-cost result is claim-grade for that bounded cohort only, not for the trader's full history.
-          - Chronological pair formation matches complementary BUY lots FIFO. Markets containing SELL fills are excluded from that bounded pair-cost method.
-          - Public timestamps are second-resolution, so within-second price-order sensitivity is reported separately.
-          - \`reports/smoke-assumed-complete\` remains a mechanical-only output and must not be used for claim validation.
+          - \`reports/bounded-claim-grade\` treats only observed \`btc-updown-5m-<epoch>\` markets whose complete five-minute interval lies inside the collection interval as complete.
+          - \`reports/pair-sensitivity\` compares FIFO, LIFO, incremental weighted-average, latency, market-time, and transaction-hash diagnostics over the same bounded cohort.
+          - Public timestamps are second-resolution, so no sub-second sequence certainty is claimed.
+          - \`reports/smoke-assumed-complete\` remains mechanical-only and must not be used for claim validation.
           EOF
 
       - name: Summarize artifact contents
