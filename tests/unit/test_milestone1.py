@@ -32,7 +32,7 @@ from polymarket_edge_lab.models.trade import NormalizedTrade
 from polymarket_edge_lab.normalization.trades import (
     _make_identity_hash,
     _parse_decimal,
-    _parse_unix_seconds_to_utc,
+    _parse_ms_to_utc,
     normalize_records,
 )
 from polymarket_edge_lab.storage.normalized import (
@@ -52,22 +52,23 @@ FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "trades_page_offset0.
 
 
 def _fixture_records() -> list[dict[str, Any]]:
+    # Use parse_float=Decimal to match how the collector parses real API responses.
     with FIXTURE_PATH.open(encoding="utf-8") as fh:
-        return json.load(fh)  # type: ignore[return-value]
+        return json.loads(fh.read(), parse_float=Decimal)  # type: ignore[return-value]
 
 
 def _make_trade(**kwargs: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": "t1",
-        "market": "0xmarket",
-        "asset_id": "0xasset",
+        "conditionId": "0xmarket000000000000000000000000000000000000000000000000000000000000",
+        "asset": "12345678901234567",
         "side": "BUY",
-        "size": "100",
-        "price": "0.55",
-        "match_time": "1723634400",
+        "size": Decimal("100"),
+        "price": Decimal("0.55"),
+        "timestamp": 1723634400000,
         "outcome": "UP",
-        "owner": "0xowner",
-        "transaction_hash": "0xtxhash",
+        "proxyWallet": "0xowner000000000000000000000000000000000000",
+        "transactionHash": "0xtxhash",
     }
     base.update(kwargs)
     return base
@@ -140,20 +141,20 @@ def test_non_list_payload_raises() -> None:
 
 def test_missing_required_field_rejects() -> None:
     records = [_make_trade()]
-    del records[0]["market"]
+    del records[0]["conditionId"]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
-    assert "market" in result.rejected[0].reason
+    assert "conditionId" in result.rejected[0].reason
 
 
 def test_multiple_missing_fields_counted() -> None:
     records = [_make_trade()]
-    del records[0]["market"]
+    del records[0]["conditionId"]
     del records[0]["outcome"]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
     # Both missing fields should appear in the reason.
-    assert "market" in result.rejected[0].reason
+    assert "conditionId" in result.rejected[0].reason
     assert "outcome" in result.rejected[0].reason
 
 
@@ -170,39 +171,29 @@ def test_unknown_fields_in_raw_extra() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Unix-seconds-to-UTC conversion
+# Unix-milliseconds-to-UTC conversion
 # ---------------------------------------------------------------------------
 
 
-def test_unix_seconds_string_converted_to_utc() -> None:
-    ts = _parse_unix_seconds_to_utc("1723634400")
+def test_unix_ms_int_converted_to_utc() -> None:
+    ts = _parse_ms_to_utc(1723634400000)
     assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
     assert ts.utcoffset().seconds == 0  # type: ignore[union-attr]
 
 
-def test_unix_seconds_int_converted_to_utc() -> None:
-    ts = _parse_unix_seconds_to_utc(1723634400)
-    assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
-
-
-def test_unix_seconds_zero_fractional_accepted() -> None:
-    ts = _parse_unix_seconds_to_utc("1723634400.0")
+def test_unix_ms_string_converted_to_utc() -> None:
+    ts = _parse_ms_to_utc("1723634400000")
     assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
 
 
 def test_invalid_timestamp_string_rejected() -> None:
     with pytest.raises(ValueError, match="cannot parse"):
-        _parse_unix_seconds_to_utc("not-a-number")
-
-
-def test_sub_second_timestamp_rejected() -> None:
-    with pytest.raises(ValueError, match="sub-second"):
-        _parse_unix_seconds_to_utc("1723634400.5")
+        _parse_ms_to_utc("not-a-number")
 
 
 def test_raw_float_timestamp_rejected() -> None:
     with pytest.raises(ValueError, match="raw float"):
-        _parse_unix_seconds_to_utc(1723634400.5)
+        _parse_ms_to_utc(1723634400000.5)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +203,12 @@ def test_raw_float_timestamp_rejected() -> None:
 
 def test_decimal_from_string() -> None:
     d = _parse_decimal("0.44", "price")
+    assert d == Decimal("0.44")
+
+
+def test_decimal_from_decimal_object() -> None:
+    """Decimal objects (from parse_float=Decimal JSON parsing) are passed through."""
+    d = _parse_decimal(Decimal("0.44"), "price")
     assert d == Decimal("0.44")
 
 
@@ -251,27 +248,27 @@ def test_sell_side_accepted() -> None:
 
 
 def test_price_above_one_rejected() -> None:
-    records = [_make_trade(price="1.01")]
+    records = [_make_trade(price=Decimal("1.01"))]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
     assert "price" in result.rejected[0].reason.lower()
 
 
 def test_price_below_zero_rejected() -> None:
-    records = [_make_trade(price="-0.01")]
+    records = [_make_trade(price=Decimal("-0.01"))]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
 
 
 def test_size_zero_rejected() -> None:
-    records = [_make_trade(size="0")]
+    records = [_make_trade(size=Decimal("0"))]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
     assert "size" in result.rejected[0].reason.lower()
 
 
 def test_size_negative_rejected() -> None:
-    records = [_make_trade(size="-1")]
+    records = [_make_trade(size=Decimal("-1"))]
     result = normalize_records(records, account=ACCOUNT)
     assert len(result.rejected) == 1
 
@@ -289,8 +286,8 @@ def test_identity_hash_is_deterministic() -> None:
 
 
 def test_identity_hash_differs_on_different_record() -> None:
-    r1 = _make_trade(price="0.44")
-    r2 = _make_trade(price="0.55")
+    r1 = _make_trade(price=Decimal("0.44"))
+    r2 = _make_trade(price=Decimal("0.55"))
     assert _make_identity_hash(r1) != _make_identity_hash(r2)
 
 
@@ -375,7 +372,8 @@ def _make_normalized_trade(source_trade_id: str = "t1") -> NormalizedTrade:
         source="test",
         source_trade_id=source_trade_id,
         account=ACCOUNT,
-        market_id="0xmarket",
+        market_id="0xmarket000000000000000000000000000000000000000000000000000000000000",
+        asset_id="12345678901234567",
         timestamp=datetime(2024, 8, 14, 10, 0, 0, tzinfo=UTC),
         outcome="UP",
         side="BUY",
@@ -502,8 +500,12 @@ def test_pagination_stop_on_short_page() -> None:
 
     # page_a has exactly `limit` records (full page) → continue
     # page_b has fewer records (short page) → stop
-    page_a = json.dumps([_make_trade(id="t1"), _make_trade(id="t2"), _make_trade(id="t3")])
-    page_b = json.dumps([_make_trade(id="t4")])  # Short page (1 < 3) → stop
+    # Use default=float so Decimal values in _make_trade serialize as JSON numbers,
+    # matching what the real Data API returns.
+    page_a = json.dumps(
+        [_make_trade(id="t1"), _make_trade(id="t2"), _make_trade(id="t3")], default=float
+    )
+    page_b = json.dumps([_make_trade(id="t4")], default=float)  # Short page (1 < 3) → stop
 
     responses = [
         httpx.Response(200, text=page_a, headers={"Content-Type": "application/json"}),

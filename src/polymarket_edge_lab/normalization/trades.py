@@ -4,16 +4,25 @@ Field mappings are derived from the official Polymarket Data API documentation
 (https://docs.polymarket.com/) and the documented response shape of
 GET https://data-api.polymarket.com/trades.
 
-Verified endpoint shape (2026-08-14): JSON array of objects with at minimum
-the keys listed in REQUIRED_FIELDS. Response confirmed to return Unix-seconds
-timestamps as string-encoded integers in the ``match_time`` field.
+Schema status (2026-08-14): field names verified against official Polymarket
+Data API documentation.  Live response shape not confirmed due to network
+restriction during implementation — see tests/fixtures/README.md.
+TODO: Confirm field names and types against a live response before production use.
+
+Public Data API field mapping
+-----------------------------
+``conditionId``  → ``market_id``   (hex condition/market ID)
+``asset``        → ``asset_id``    (CTF token ID; required for UP/DOWN analysis)
+``proxyWallet``  → ``account``
+``timestamp``    → ``timestamp``   (Unix milliseconds integer → UTC datetime)
+``transactionHash`` → ``transaction_hash``
+``side``, ``size``, ``price``, ``outcome`` retained as-is.
 
 NOTE: The Data API does not appear to guarantee a unique fill ID per row.
-``id`` is used when present; otherwise a deterministic SHA-256 hash of
-(transaction_hash, asset_id, side, price, size, match_time, owner) is used
-as ``source_trade_id``.  Economically identical fills in the same transaction
-may therefore be indistinguishable if the API omits a fill ID.
-TODO: Confirm uniqueness guarantee of ``id`` against additional live responses.
+``id`` is used when present; otherwise a deterministic SHA-256 hash of the
+key tuple is used as ``source_trade_id``.  Economically identical fills in
+the same transaction may therefore be indistinguishable.
+TODO: Confirm uniqueness guarantee of ``id`` against live responses.
 """
 
 from __future__ import annotations
@@ -31,8 +40,9 @@ from polymarket_edge_lab.models.trade import NormalizedTrade
 logger = logging.getLogger(__name__)
 
 # Fields that must be present and non-empty for a record to be accepted.
+# These match the public Polymarket Data API /trades response shape.
 REQUIRED_FIELDS: frozenset[str] = frozenset(
-    {"market", "asset_id", "side", "size", "price", "match_time", "outcome", "owner"}
+    {"conditionId", "asset", "side", "size", "price", "timestamp", "outcome", "proxyWallet"}
 )
 
 SOURCE_NAME = "polymarket-data-api"
@@ -60,59 +70,63 @@ def _make_identity_hash(record: dict[str, Any]) -> str:
     """Build a deterministic deduplication key from verified source fields.
 
     Uses SHA-256 of the canonical JSON-serialized key tuple. Fields are taken
-    from the raw record; missing values are represented as empty strings.
+    from the raw record (Data API field names); missing values are represented
+    as empty strings.
     """
     key_data = {
-        "transaction_hash": record.get("transaction_hash") or "",
-        "asset_id": record.get("asset_id") or "",
+        "transactionHash": record.get("transactionHash") or "",
+        "asset": record.get("asset") or "",
         "side": record.get("side") or "",
-        "price": record.get("price") or "",
-        "size": record.get("size") or "",
-        "match_time": record.get("match_time") or "",
-        "owner": record.get("owner") or "",
+        "price": str(record.get("price") or ""),
+        "size": str(record.get("size") or ""),
+        "timestamp": str(record.get("timestamp") or ""),
+        "proxyWallet": record.get("proxyWallet") or "",
     }
     canonical = json.dumps(key_data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _parse_unix_seconds_to_utc(raw_ts: Any, field: str = "match_time") -> datetime:
-    """Parse a Unix-seconds value (int, float string, or numeric string) to UTC.
+def _parse_ms_to_utc(raw_ts: Any, field: str = "timestamp") -> datetime:
+    """Parse a Unix-milliseconds value (integer) to UTC datetime.
 
-    Raises ValueError if the value is not a clean integral seconds value.
-    Float strings with a decimal part (e.g. "1723634400.5") are rejected as
-    ambiguous unless the fractional part is exactly zero.
+    The public Data API returns ``timestamp`` as a plain integer number of
+    milliseconds since the Unix epoch.  Float values are rejected to avoid
+    silent precision loss.
+
+    Raises ValueError for non-integer or unparseable inputs.
     """
     if isinstance(raw_ts, float):
-        # Reject raw Python floats — they may lose precision.
         raise ValueError(
             f"{field}: raw float values are rejected to avoid precision loss; "
-            f"got {raw_ts!r}. Pass as int or numeric string."
+            f"got {raw_ts!r}. Pass as integer milliseconds."
         )
     if isinstance(raw_ts, int):
-        return datetime.fromtimestamp(raw_ts, tz=UTC)
-    # String path — common for this API.
+        return datetime.fromtimestamp(raw_ts / 1000, tz=UTC)
+    # String path — parse as integer.
     s = str(raw_ts).strip()
-    if "." in s:
-        int_part, frac_part = s.split(".", 1)
-        if frac_part.lstrip("0"):
-            raise ValueError(f"{field}: sub-second timestamp {raw_ts!r} is ambiguous/unsupported")
-        s = int_part
     try:
-        seconds = int(s)
+        ms = int(s)
     except ValueError as exc:
-        raise ValueError(f"{field}: cannot parse as integer seconds: {raw_ts!r}") from exc
-    return datetime.fromtimestamp(seconds, tz=UTC)
+        raise ValueError(f"{field}: cannot parse as integer milliseconds: {raw_ts!r}") from exc
+    return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
 def _parse_decimal(value: Any, field: str) -> Decimal:
-    """Parse a price/size value from the raw API string to Decimal.
+    """Parse a price/size value from the raw API to Decimal.
 
-    Avoids float intermediates to preserve precision.
+    The public Data API returns ``price`` and ``size`` as JSON numbers.  When
+    the response is parsed with ``json.loads(..., parse_float=Decimal)`` the
+    values arrive as ``Decimal`` objects; those are returned directly.
+    Plain strings and integers are also accepted.  Raw Python ``float``
+    objects are rejected to avoid silent precision loss — they indicate the
+    response was decoded without ``parse_float=Decimal``.
     """
+    if isinstance(value, Decimal):
+        return value
     if isinstance(value, float):
         raise ValueError(
             f"{field}: raw float rejected to avoid precision loss; got {value!r}. "
-            "Ensure JSON is parsed with parse_float=Decimal or string values are used."
+            "Ensure JSON is parsed with parse_float=Decimal."
         )
     try:
         return Decimal(str(value))
@@ -202,9 +216,9 @@ def _normalize_one(
     if shares <= Decimal("0"):
         raise ValueError(f"size must be > 0: {shares}")
 
-    timestamp = _parse_unix_seconds_to_utc(record["match_time"])
+    timestamp = _parse_ms_to_utc(record["timestamp"])
 
-    # Normalise to UTC (verify offset is zero).
+    # Verify UTC.
     utc_offset = timestamp.utcoffset()
     from datetime import timedelta
 
@@ -217,21 +231,26 @@ def _normalize_one(
     # Collect unknown fields into raw_extra.
     known_fields = {
         "id",
-        "market",
-        "asset_id",
+        "conditionId",
+        "asset",
         "side",
         "size",
         "price",
-        "match_time",
+        "timestamp",
         "outcome",
-        "owner",
-        "transaction_hash",
-        "taker_order_id",
-        "fee_rate_bps",
+        "proxyWallet",
+        "transactionHash",
+        "outcomeIndex",
+        "slug",
+        "eventSlug",
+        "title",
+        # Less common fields that may appear:
+        "takerOrderId",
+        "feeRateBps",
         "status",
-        "last_update",
-        "bucket_index",
-        "maker_address",
+        "lastUpdate",
+        "bucketIndex",
+        "makerAddress",
     }
     raw_extra = {k: v for k, v in record.items() if k not in known_fields}
     raw_extra["_raw_page_path"] = raw_page_path
@@ -243,12 +262,17 @@ def _normalize_one(
         source=SOURCE_NAME,
         source_trade_id=source_trade_id,
         account=account,
-        market_id=str(record["market"]),
+        market_id=str(record["conditionId"]),
+        asset_id=str(record["asset"]),
         timestamp=timestamp,
         outcome=str(record["outcome"]),
         side=side,
         price=price,
         shares=shares,
-        transaction_hash=record.get("transaction_hash") or None,
+        transaction_hash=record.get("transactionHash") or None,
+        outcome_index=record.get("outcomeIndex"),
+        slug=record.get("slug") or None,
+        event_slug=record.get("eventSlug") or None,
+        title=record.get("title") or None,
         raw_extra=raw_extra,
     )

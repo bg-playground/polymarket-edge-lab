@@ -10,17 +10,20 @@ Separation of concerns:
   - Raw storage is in storage/raw.py.
   - The CLI orchestrator is in scripts/collect_historical_trades.py.
 
-API notes (verified 2026-08-14 from docs; live response shape not confirmed
-due to network restriction — see tests/fixtures/README.md):
+API notes (verified 2026-08-14 from official docs; live response shape not
+confirmed due to network restriction — see tests/fixtures/README.md):
   - Response is a JSON array.
   - Pagination uses offset/limit; empty array signals end.
   - Documented offset upper bound: 10 000 (see README Known Limitations).
   - Does not require authentication for public wallet addresses.
+  - ``price`` and ``size`` are JSON numbers; parsed with parse_float=Decimal.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -73,7 +76,9 @@ class PolymarketPublicTradeCollector:
         -------
         (raw_bytes, records):
             ``raw_bytes`` is the exact HTTP response body for immutable storage.
-            ``records`` is the parsed JSON list.
+            ``records`` is the parsed JSON list, with numeric fields decoded as
+            ``Decimal`` (via ``json.loads(..., parse_float=Decimal)``) to avoid
+            float precision loss on ``price`` and ``size``.
 
         Raises
         ------
@@ -91,7 +96,9 @@ class PolymarketPublicTradeCollector:
                 response = await client.get(url, params=params)
         response.raise_for_status()
         raw_bytes = response.content
-        payload = response.json()
+        # Parse with parse_float=Decimal so JSON numbers for price/size arrive
+        # as Decimal objects rather than floats, preserving precision.
+        payload = json.loads(raw_bytes, parse_float=Decimal)
         if not isinstance(payload, list):
             raise TypeError(f"Expected list payload from {url}, got {type(payload).__name__}")
         return raw_bytes, payload

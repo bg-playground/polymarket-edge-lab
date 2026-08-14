@@ -9,20 +9,34 @@ Deterministic fixture representing the documented shape of a response from
 **Parameters:** `user`, `offset`, `limit`
 **Response shape:** JSON array of trade objects.
 
-This fixture was constructed on 2026-08-14 from the official Polymarket Data API
-documentation (https://docs.polymarket.com/) and the documented field names
-observed in the public API. Network access was unavailable during agent execution,
-so this fixture represents the documented shape. See `src/polymarket_edge_lab/normalization/trades.py`
-for field mapping assumptions and the "Known Limitations" section of the README.
+**Schema status:** Field names verified against official Polymarket Data API
+documentation (https://docs.polymarket.com/) and the public developer cheatsheet
+(as of 2026-08-14).  Live response shape not confirmed due to network restriction
+during agent execution.
+TODO: Verify field names, types, and timestamp unit against a live response
+before production use.  Update this fixture from a real small sample when
+network access is available.
 
-**Key fields (all confirmed against docs):**
-- `id` — trade identifier (string, may be absent; used in dedup hash)
-- `market` — condition/market ID (hex string)
-- `asset_id` — token/outcome share ID
+**Documented Data API fields (this fixture):**
+- `id` — trade identifier (string; may be absent)
+- `conditionId` — condition/market ID (hex string)
+- `asset` — CTF token ID for the specific outcome share (numeric string)
 - `side` — "BUY" or "SELL"
-- `size` — share quantity (string-encoded decimal)
-- `price` — price per share (string-encoded decimal, 0–1)
-- `match_time` — Unix seconds timestamp (string-encoded integer)
+- `size` — share quantity (**JSON number**, parsed with `parse_float=Decimal`)
+- `price` — price per share (**JSON number** 0–1, parsed with `parse_float=Decimal`)
+- `timestamp` — Unix **milliseconds** integer
 - `outcome` — outcome label as returned by API (preserved as-is)
-- `owner` — proxy wallet address
-- `transaction_hash` — on-chain tx hash (may be null/absent)
+- `outcomeIndex` — numeric outcome index (integer, may be absent)
+- `proxyWallet` — proxy wallet address
+- `transactionHash` — on-chain tx hash (may be null/absent)
+- `slug` — market slug (may be absent)
+- `eventSlug` — event slug (may be absent)
+- `title` — market question/title (may be absent)
+
+**Important distinctions from CLOB API shape:**
+- `conditionId` (not `market`)
+- `asset` (not `asset_id`)
+- `proxyWallet` (not `owner`)
+- `timestamp` in **milliseconds** (not `match_time` in seconds)
+- `transactionHash` camelCase (not `transaction_hash`)
+- `price` and `size` are **JSON numbers**, not strings

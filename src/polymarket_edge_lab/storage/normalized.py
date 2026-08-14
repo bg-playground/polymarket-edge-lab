@@ -32,12 +32,17 @@ ARROW_SCHEMA = pa.schema(
         pa.field("source_trade_id", pa.string()),
         pa.field("account", pa.string()),
         pa.field("market_id", pa.string()),
+        pa.field("asset_id", pa.string()),
         pa.field("timestamp", pa.timestamp("us", tz="UTC")),
         pa.field("outcome", pa.string()),
         pa.field("side", pa.string()),
         pa.field("price", pa.string()),  # stored as string to preserve Decimal precision
         pa.field("shares", pa.string()),  # stored as string to preserve Decimal precision
         pa.field("transaction_hash", pa.string()),
+        pa.field("outcome_index", pa.int64()),
+        pa.field("slug", pa.string()),
+        pa.field("event_slug", pa.string()),
+        pa.field("title", pa.string()),
         pa.field("raw_extra", pa.string()),  # JSON string
     ]
 )
@@ -49,12 +54,17 @@ def _trade_to_row(trade: NormalizedTrade) -> dict[str, Any]:
         "source_trade_id": trade.source_trade_id,
         "account": trade.account,
         "market_id": trade.market_id,
+        "asset_id": trade.asset_id,
         "timestamp": trade.timestamp,
         "outcome": trade.outcome,
         "side": trade.side,
         "price": str(trade.price),
         "shares": str(trade.shares),
         "transaction_hash": trade.transaction_hash or "",
+        "outcome_index": trade.outcome_index,
+        "slug": trade.slug or "",
+        "event_slug": trade.event_slug or "",
+        "title": trade.title or "",
         "raw_extra": json.dumps(trade.raw_extra),
     }
 
@@ -75,12 +85,17 @@ def _row_to_trade(row: dict[str, Any]) -> NormalizedTrade:
         source_trade_id=row["source_trade_id"],
         account=row["account"],
         market_id=row["market_id"],
+        asset_id=row["asset_id"],
         timestamp=ts,
         outcome=row["outcome"],
         side=row["side"],
         price=Decimal(row["price"]),
         shares=Decimal(row["shares"]),
         transaction_hash=row["transaction_hash"] or None,
+        outcome_index=row.get("outcome_index"),
+        slug=row.get("slug") or None,
+        event_slug=row.get("event_slug") or None,
+        title=row.get("title") or None,
         raw_extra=raw_extra,
     )
 
@@ -143,12 +158,17 @@ CREATE TABLE IF NOT EXISTS trades (
     source_trade_id VARCHAR NOT NULL,
     account VARCHAR NOT NULL,
     market_id VARCHAR NOT NULL,
+    asset_id VARCHAR NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     outcome VARCHAR NOT NULL,
     side VARCHAR NOT NULL,
     price VARCHAR NOT NULL,
     shares VARCHAR NOT NULL,
     transaction_hash VARCHAR,
+    outcome_index BIGINT,
+    slug VARCHAR,
+    event_slug VARCHAR,
+    title VARCHAR,
     raw_extra VARCHAR,
     PRIMARY KEY (source_trade_id)
 );
@@ -182,7 +202,7 @@ def write_duckdb(
             conn.execute(
                 """
                 INSERT INTO trades VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 [
@@ -190,12 +210,17 @@ def write_duckdb(
                     row["source_trade_id"],
                     row["account"],
                     row["market_id"],
+                    row["asset_id"],
                     row["timestamp"],
                     row["outcome"],
                     row["side"],
                     row["price"],
                     row["shares"],
                     row["transaction_hash"],
+                    row["outcome_index"],
+                    row["slug"],
+                    row["event_slug"],
+                    row["title"],
                     row["raw_extra"],
                 ],
             )
