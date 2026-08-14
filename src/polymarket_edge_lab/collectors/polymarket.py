@@ -2,7 +2,7 @@
 
 Fetches paginated trade history from the official public Data API:
   GET https://data-api.polymarket.com/trades
-  Parameters: user, offset, limit
+  Parameters: user, offset, limit[, startTs, endTs]
 
 Separation of concerns:
   - This module handles HTTP transport only.
@@ -15,8 +15,12 @@ confirmed due to network restriction — see tests/fixtures/README.md):
   - Response is a JSON array.
   - Pagination uses offset/limit; empty array signals end.
   - Documented offset upper bound: 10 000 (see README Known Limitations).
+  - ``startTs`` / ``endTs`` epoch-second parameters narrow the query window;
+    use these to bypass the offset ceiling for deep history.
   - Does not require authentication for public wallet addresses.
   - ``price`` and ``size`` are JSON numbers; parsed with parse_float=Decimal.
+TODO: Confirm parameter names (startTs/endTs vs start/end/startTime/endTime)
+      against a live response before production use.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ logger = logging.getLogger(__name__)
 DATA_API_BASE = "https://data-api.polymarket.com"
 
 # Documented API offset ceiling.  The API may silently return empty results
-# past this bound.  The collector stops pagination when a page is short/empty.
+# past this bound.  Use time-window parameters (startTs/endTs) for deep history.
 OFFSET_CEILING = 10_000
 
 
@@ -69,8 +73,27 @@ class PolymarketPublicTradeCollector:
         account: str,
         offset: int = 0,
         limit: int = 100,
+        window_start: int | None = None,
+        window_end: int | None = None,
     ) -> tuple[bytes, list[dict[str, Any]]]:
         """Fetch one page of trade history.
+
+        Parameters
+        ----------
+        account:
+            Proxy wallet address to query.
+        offset:
+            Page offset within the current window.
+        limit:
+            Maximum number of records per page.
+        window_start:
+            Optional lower time bound as Unix epoch **seconds** (``startTs``
+            parameter).  When provided together with ``window_end``, results
+            are restricted to ``[window_start, window_end)``, allowing full
+            history retrieval across multiple non-overlapping windows.
+        window_end:
+            Optional upper time bound as Unix epoch **seconds** (``endTs``
+            parameter).
 
         Returns
         -------
@@ -89,6 +112,10 @@ class PolymarketPublicTradeCollector:
         """
         url = f"{self._base_url}/trades"
         params: dict[str, str | int] = {"user": account, "offset": offset, "limit": limit}
+        if window_start is not None:
+            params["startTs"] = window_start
+        if window_end is not None:
+            params["endTs"] = window_end
         if self._client is not None:
             response = await self._client.get(url, params=params)
         else:
@@ -103,5 +130,18 @@ class PolymarketPublicTradeCollector:
             raise TypeError(f"Expected list payload from {url}, got {type(payload).__name__}")
         return raw_bytes, payload
 
-    def endpoint_url(self, *, account: str, offset: int, limit: int) -> str:
-        return f"{self._base_url}/trades?user={account}&offset={offset}&limit={limit}"
+    def endpoint_url(
+        self,
+        *,
+        account: str,
+        offset: int,
+        limit: int,
+        window_start: int | None = None,
+        window_end: int | None = None,
+    ) -> str:
+        base = f"{self._base_url}/trades?user={account}&offset={offset}&limit={limit}"
+        if window_start is not None:
+            base += f"&startTs={window_start}"
+        if window_end is not None:
+            base += f"&endTs={window_end}"
+        return base

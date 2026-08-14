@@ -15,6 +15,8 @@ Public Data API field mapping
 ``asset``        → ``asset_id``    (CTF token ID; required for UP/DOWN analysis)
 ``proxyWallet``  → ``account``
 ``timestamp``    → ``timestamp``   (Unix milliseconds integer → UTC datetime)
+                               NOTE: unit assumed milliseconds from fixture evidence;
+                               live response not confirmed — see TODO below.
 ``transactionHash`` → ``transaction_hash``
 ``side``, ``size``, ``price``, ``outcome`` retained as-is.
 
@@ -89,11 +91,24 @@ def _make_identity_hash(record: dict[str, Any]) -> str:
 def _parse_ms_to_utc(raw_ts: Any, field: str = "timestamp") -> datetime:
     """Parse a Unix-milliseconds value (integer) to UTC datetime.
 
-    The public Data API returns ``timestamp`` as a plain integer number of
-    milliseconds since the Unix epoch.  Float values are rejected to avoid
-    silent precision loss.
+    The public Data API documentation is inconsistent: time-filter *parameters*
+    (``start``/``end``) are described in epoch **seconds**, but the response
+    ``timestamp`` field appears as a large integer consistent with epoch
+    **milliseconds** (values ~1.7 × 10¹²).  This function assumes
+    milliseconds and raises ``ValueError`` if the parsed result falls outside
+    the plausible Polymarket trading epoch (2019-10-01 → 2040-01-01) —
+    catching the common mistake of passing an epoch-seconds value that would
+    silently produce a 1970-era datetime.
 
-    Raises ValueError for non-integer or unparseable inputs.
+    Schema status: unit confirmed against published fixture values
+    (1 723 634 400 000 ms = 2024-08-14 11:20:00 UTC).  The unit must be
+    re-verified against a live response before production use.
+    TODO: Confirm milliseconds vs. seconds with a live /trades response.
+
+    Float values are rejected to avoid silent precision loss.
+
+    Raises ValueError for non-integer, unparseable, or out-of-plausible-range
+    inputs.
     """
     if isinstance(raw_ts, float):
         raise ValueError(
@@ -101,14 +116,41 @@ def _parse_ms_to_utc(raw_ts: Any, field: str = "timestamp") -> datetime:
             f"got {raw_ts!r}. Pass as integer milliseconds."
         )
     if isinstance(raw_ts, int):
-        return datetime.fromtimestamp(raw_ts / 1000, tz=UTC)
-    # String path — parse as integer.
-    s = str(raw_ts).strip()
-    try:
-        ms = int(s)
-    except ValueError as exc:
-        raise ValueError(f"{field}: cannot parse as integer milliseconds: {raw_ts!r}") from exc
-    return datetime.fromtimestamp(ms / 1000, tz=UTC)
+        ms = raw_ts
+    else:
+        # String path — parse as integer.
+        s = str(raw_ts).strip()
+        try:
+            ms = int(s)
+        except ValueError as exc:
+            raise ValueError(f"{field}: cannot parse as integer milliseconds: {raw_ts!r}") from exc
+
+    result = datetime.fromtimestamp(ms / 1000, tz=UTC)
+    _check_timestamp_plausibility(result, raw_ts, field)
+    return result
+
+
+# Plausible Polymarket trade timestamp bounds.
+# Lower: 2019-10-01 (platform launch).  Upper: 2040-01-01 (far-future guard).
+_TS_MIN = datetime(2019, 10, 1, tzinfo=UTC)
+_TS_MAX = datetime(2040, 1, 1, tzinfo=UTC)
+
+
+def _check_timestamp_plausibility(dt: datetime, raw_value: Any, field: str) -> None:
+    """Log a data-quality warning if *dt* is outside the plausible trading epoch.
+
+    An out-of-range result almost always means the raw value was in epoch
+    **seconds** rather than milliseconds (which produces a 1970-era datetime),
+    or the value is otherwise corrupt.  We raise ValueError so the record is
+    rejected and logged rather than silently stored with a wrong timestamp.
+    """
+    if dt < _TS_MIN or dt > _TS_MAX:
+        raise ValueError(
+            f"{field}: parsed timestamp {dt.isoformat()} is outside the plausible "
+            f"Polymarket trading epoch [{_TS_MIN.date()}, {_TS_MAX.date()}]. "
+            f"Raw value was {raw_value!r}. "
+            "Possible unit mismatch: verify whether the API returns seconds or milliseconds."
+        )
 
 
 def _parse_decimal(value: Any, field: str) -> Decimal:
