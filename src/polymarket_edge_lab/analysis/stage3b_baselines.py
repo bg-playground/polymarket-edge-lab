@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from math import log
-from typing import Callable
 
 ZERO = Decimal("0")
 
@@ -73,9 +73,13 @@ def regression_metrics(rows: list[PanelRow], predictions: list[Decimal]) -> dict
     weights = [float(row.paired_shares) for row in rows]
     errors = [float(pred - row.pair_cost) for row, pred in zip(rows, predictions, strict=True)]
     total_weight = sum(weights)
-    weighted_mae = sum(w * abs(error) for w, error in zip(weights, errors, strict=True)) / total_weight
+    weighted_mae = (
+        sum(w * abs(error) for w, error in zip(weights, errors, strict=True)) / total_weight
+    )
     unweighted_mae = sum(abs(error) for error in errors) / len(errors)
-    weighted_bias = sum(w * error for w, error in zip(weights, errors, strict=True)) / total_weight
+    weighted_bias = sum(
+        w * error for w, error in zip(weights, errors, strict=True)
+    ) / total_weight
     return {
         "weighted_mae": weighted_mae,
         "unweighted_mae": unweighted_mae,
@@ -100,7 +104,11 @@ def leave_one_window_out(
 
 
 def brier_score(actual: list[bool], probabilities: list[float]) -> float:
-    return sum((p - float(y)) ** 2 for y, p in zip(actual, probabilities, strict=True)) / len(actual)
+    squared_errors = [
+        (probability - float(label)) ** 2
+        for label, probability in zip(actual, probabilities, strict=True)
+    ]
+    return sum(squared_errors) / len(actual)
 
 
 def log_loss(actual: list[bool], probabilities: list[float]) -> float:
