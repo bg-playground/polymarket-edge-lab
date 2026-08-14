@@ -62,6 +62,7 @@ class WindowResult:
     window_end: int  # epoch seconds
     normalization_results: list[NormalizationResult] = field(default_factory=list)
     ceiling_hit: bool = False  # True if this window reached OFFSET_CEILING
+    exhausted_normally: bool = False  # True if stopped via short page.
 
     @property
     def total_accepted(self) -> int:
@@ -230,6 +231,7 @@ async def collect_window(
                 page_count,
                 page_size,
             )
+            result.exhausted_normally = True
             break
 
         offset += page_size
@@ -248,6 +250,7 @@ async def collect_windowed(
     raw_dir: Path | None = None,
     force: bool = False,
     dry_run: bool = False,
+    min_window_seconds: int = 3600,
 ) -> list[WindowResult]:
     """Collect complete trade history over ``[global_start, global_end)`` using windows.
 
@@ -280,8 +283,8 @@ async def collect_windowed(
     )
     results: list[WindowResult] = []
     for ws, we in windows:
-        wr = await collect_window(
-            collector,
+        sub_results = await _collect_window_with_subdivision(
+            collector=collector,
             account=account,
             window_start=ws,
             window_end=we,
@@ -289,16 +292,83 @@ async def collect_windowed(
             raw_dir=raw_dir,
             force=force,
             dry_run=dry_run,
+            min_window_seconds=min_window_seconds,
         )
-        results.append(wr)
-        if wr.ceiling_hit:
-            logger.warning(
-                "Window [%d, %d) hit the offset ceiling. "
-                "Re-run with a smaller --window-seconds to retrieve all records.",
-                ws,
-                we,
-            )
+        results.extend(sub_results)
     return results
+
+
+async def _collect_window_with_subdivision(
+    *,
+    collector: PolymarketPublicTradeCollector,
+    account: str,
+    window_start: int,
+    window_end: int,
+    page_size: int,
+    raw_dir: Path | None,
+    force: bool,
+    dry_run: bool,
+    min_window_seconds: int,
+) -> list[WindowResult]:
+    result = await collect_window(
+        collector,
+        account=account,
+        window_start=window_start,
+        window_end=window_end,
+        page_size=page_size,
+        raw_dir=raw_dir,
+        force=force,
+        dry_run=dry_run,
+    )
+    if not result.ceiling_hit:
+        return [result]
+
+    duration = window_end - window_start
+    if duration <= min_window_seconds:
+        logger.warning(
+            "Window [%d, %d) unresolved at minimum duration=%d seconds.",
+            window_start,
+            window_end,
+            min_window_seconds,
+        )
+        return [result]
+
+    midpoint = window_start + (duration // 2)
+    if midpoint <= window_start or midpoint >= window_end:
+        return [result]
+
+    logger.warning(
+        "Subdividing window [%d, %d) due to ceiling hit -> [%d, %d) and [%d, %d)",
+        window_start,
+        window_end,
+        window_start,
+        midpoint,
+        midpoint,
+        window_end,
+    )
+    left = await _collect_window_with_subdivision(
+        collector=collector,
+        account=account,
+        window_start=window_start,
+        window_end=midpoint,
+        page_size=page_size,
+        raw_dir=raw_dir,
+        force=force,
+        dry_run=dry_run,
+        min_window_seconds=min_window_seconds,
+    )
+    right = await _collect_window_with_subdivision(
+        collector=collector,
+        account=account,
+        window_start=midpoint,
+        window_end=window_end,
+        page_size=page_size,
+        raw_dir=raw_dir,
+        force=force,
+        dry_run=dry_run,
+        min_window_seconds=min_window_seconds,
+    )
+    return [result, *left, *right]
 
 
 def deduplicate_across_windows(window_results: list[WindowResult]) -> list[Any]:

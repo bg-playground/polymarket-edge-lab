@@ -4,9 +4,9 @@ Forensic reconstruction, market-microstructure research, and systematic edge dis
 
 ## Current phase
 
-**Milestone 1 only: historical data acquisition and validation.**
+**Milestone 2: live validation and forensic reconstruction.**
 
-The immediate goal is to build a trustworthy, reproducible historical trade ledger that can later be used to reconstruct `nagi777`'s inventory and test claims about paired inventory, directional residuals, pair cost, trading frequency, and P&L.
+The immediate goal is to live-validate public API behavior and reconstruct a trustworthy, reproducible `nagi777` trade/inventory ledger for claim validation (paired inventory, directional residuals, pair cost, trading frequency, and measurable economics).
 
 This repository is intentionally **not** starting with live trading, wallet signing, LangGraph, neural networks, or strategy optimization.
 
@@ -23,6 +23,9 @@ src/polymarket_edge_lab/
 
 scripts/
   collect_historical_trades.py   # CLI orchestrator
+  validate_live_api.py           # Explicit live Data API validation gate
+  reconstruct_trader.py          # Canonical ledger + inventory + market summaries
+  generate_claim_report.py       # JSON/Markdown claim validation outputs
 
 tests/
   fixtures/                      # Small deterministic JSON fixtures
@@ -41,7 +44,20 @@ tests/
 | `validation/report.py` | Validation summary counts and earliest/latest timestamps. |
 | `models/trade.py` | `NormalizedTrade` Pydantic model (frozen, UTC-aware timestamps, Decimal). |
 
-## Verified endpoint and response assumptions
+## Live API validation gate
+
+Run this command before relying on API assumptions:
+
+```bash
+python scripts/validate_live_api.py --account 0xVERIFIED_PUBLIC_PROXY_WALLET
+```
+
+It writes `docs/LIVE_API_VALIDATION.md` with:
+- observed facts from live responses;
+- unresolved assumptions;
+- a visible **BLOCKED** status when network access or verified target metadata is unavailable.
+
+## Endpoint and response assumptions (until live gate succeeds)
 
 **Endpoint:** `GET https://data-api.polymarket.com/trades`  
 **Parameters:** `user` (proxy wallet address), `offset` (int), `limit` (int)  
@@ -137,35 +153,97 @@ python scripts/collect_historical_trades.py \
     --dry-run
 ```
 
-## First real `nagi777` collection run
+## Target configuration (`nagi777`)
 
-1. Find the proxy wallet address for `nagi777`:
-   - Visit https://polymarket.com/profile/nagi777
-   - Copy the proxy wallet address (0x…) shown on the profile page.
+Research targets are configured in:
 
-2. Run the collector (replace `0xSEE_STEP_1` with the verified address):
+`config/targets.json`
+
+`nagi777` metadata includes:
+- `nickname`
+- `proxy_wallet` (must be verified from public evidence; never guessed)
+- `verification_source`
+- `verification_date_utc`
+- `verification_status`
+
+## Small real `nagi777` sample collection
+
+1. Verify `nagi777` proxy wallet from public evidence (e.g. profile page).
+2. Run:
 
 ```bash
 python scripts/collect_historical_trades.py \
-    --account 0xSEE_STEP_1 \
+    --account 0xVERIFIED_NAGI777_PROXY \
+    --windowed \
+    --global-start 1735689600 \
+    --global-end 1735776000 \
+    --window-seconds 3600 \
+    --min-window-seconds 900 \
     --page-size 100 \
     --raw-dir data/raw \
     --normalized-dir data/normalized \
     --duckdb-path data/polymarket_edge_lab.duckdb
 ```
 
+## Full historical `nagi777` forensic collection
+
+```bash
+python scripts/collect_historical_trades.py \
+    --account 0xVERIFIED_NAGI777_PROXY \
+    --windowed \
+    --global-start 1569888000 \
+    --window-seconds 2592000 \
+    --min-window-seconds 3600 \
+    --page-size 500 \
+    --raw-dir data/raw \
+    --normalized-dir data/normalized \
+    --duckdb-path data/polymarket_edge_lab.duckdb
+```
+
+If unresolved windows remain after subdivision, completeness is reported visibly and the command exits non-zero.
+
+## Reconstruction and claim validation
+
+```bash
+python scripts/reconstruct_trader.py \
+    --target nagi777 \
+    --account 0xVERIFIED_NAGI777_PROXY \
+    --duckdb-path data/polymarket_edge_lab.duckdb \
+    --output-dir reports \
+    --history-complete
+
+python scripts/generate_claim_report.py \
+    --target nagi777 \
+    --account 0xVERIFIED_NAGI777_PROXY \
+    --duckdb-path data/polymarket_edge_lab.duckdb \
+    --output-dir reports \
+    --history-complete
+```
+
+Report paths:
+- `reports/nagi777_claim_validation.json`
+- `reports/nagi777_claim_validation.md`
+
+Accounting conventions:
+- Primary pair-cost method: weighted-average inventory accounting at pair-increase events.
+- Portfolio-level pair-cost claim metric: pair-quantity-weighted mean over complete eligible markets.
+- Secondary sensitivity: FIFO cost of final paired inventory.
+- Pair-formation flow is reported separately as gross positive paired-inventory deltas; ending paired inventory is reported independently.
+- Gross pair edge: `1 - pair_cost`.
+- Exposure metrics: event/share-weighted, end-of-market, and dollar-cost-weighted.
+
 ## Known limitations
 
 - **No live API confirmation during development:** Network access was unavailable
-  during agent implementation. Field mappings are based on official Polymarket docs.
-  Run the integration test with a real account to verify response shape.
+  during agent implementation. Run `scripts/validate_live_api.py` in a network-enabled
+  environment before marking live validation complete.
 - **Offset ceiling:** The Data API appears to limit responses to offset ≤ 10 000.
   Complete trade history may not be available for accounts with > 10 000 trades.
 - **No unique fill ID guarantee:** If the API returns multiple economically identical
   fills in one transaction without a fill `id`, they may hash to the same
   `source_trade_id` and be treated as duplicates.
-- **nagi777 proxy wallet:** The proxy wallet address for `nagi777` must be obtained
-  manually from the Polymarket UI before running the collector.
+- **nagi777 proxy wallet:** must be verified from public evidence and stored in
+  `config/targets.json`; never hard-code or guess.
 
 ## Data policy
 
