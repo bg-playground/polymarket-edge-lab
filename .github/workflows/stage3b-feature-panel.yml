@@ -1,0 +1,68 @@
+name: Milestone 3B feature panel
+
+on:
+  push:
+    branches:
+      - milestone-3b-feature-panel-baselines
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  feature-panel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: pip install -e ".[dev]"
+      - name: Run deterministic tests
+        run: pytest -q
+      - name: Define frozen seven-day panel
+        run: |
+          mkdir -p evidence/stage3b data/stage3b reports/stage3b
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          windows = []
+          for day in range(7, 14):
+              start = int(datetime(2026, 8, day, 12, 0, tzinfo=timezone.utc).timestamp())
+              windows.append({
+                  "window_id": f"2026-08-{day:02d}T12-18Z",
+                  "start_epoch": start,
+                  "end_epoch": start + 21600,
+              })
+          with open("evidence/stage3b/window_manifest.json", "w", encoding="utf-8") as handle:
+              json.dump({"windows": windows}, handle, indent=2)
+          PY
+      - name: Collect causal BTC reference data
+        run: |
+          START=$(python -c 'import json; print(json.load(open("evidence/stage3b/window_manifest.json"))["windows"][0]["start_epoch"] - 300)')
+          END=$(python -c 'import json; print(json.load(open("evidence/stage3b/window_manifest.json"))["windows"][-1]["end_epoch"])')
+          python scripts/collect_btc_reference.py \
+            --start "$START" --end "$END" \
+            --raw evidence/stage3b/coinbase-btc-usd-60s-raw.json \
+            --provenance evidence/stage3b/coinbase-btc-usd-60s-provenance.json
+      - name: Record resolution guardrail
+        run: |
+          cat > evidence/stage3b/BTC_RESOLUTION_NOTE.md <<'EOF'
+          # BTC reference resolution
+
+          Stage 3B uses public Coinbase Exchange BTC-USD candles at 60-second granularity.
+          Therefore the predeclared 15-second and 30-second BTC features are not claim-grade and
+          must remain null/disabled in the materialized panel. 60-second and 120-second features
+          may be evaluated only with causal candle-close semantics.
+          EOF
+      - name: Upload Stage 3B evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-3b-feature-panel-evidence
+          path: |
+            evidence/stage3b/
+            reports/stage3b/
+          if-no-files-found: error
+          retention-days: 30
