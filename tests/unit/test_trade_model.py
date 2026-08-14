@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -13,7 +13,8 @@ def test_notional_is_price_times_shares() -> None:
         source_trade_id="trade-1",
         account="0xabc",
         market_id="market-1",
-        timestamp=datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc),
+        asset_id="12345678901234567",
+        timestamp=datetime(2026, 8, 14, 12, 0, tzinfo=UTC),
         outcome="UP",
         side="BUY",
         price=Decimal("0.44"),
@@ -29,6 +30,7 @@ def test_naive_timestamp_is_rejected() -> None:
             source_trade_id="trade-1",
             account="0xabc",
             market_id="market-1",
+            asset_id="12345678901234567",
             timestamp=datetime(2026, 8, 14, 12, 0),
             outcome="UP",
             side="BUY",

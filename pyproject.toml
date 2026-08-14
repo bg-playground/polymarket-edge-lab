@@ -14,6 +14,7 @@ dependencies = [
     "pydantic>=2.8",
     "pyarrow>=17",
     "python-dotenv>=1.0",
+    "pytz>=2024.1",
     "tenacity>=9.0",
 ]
 
@@ -43,3 +44,7 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 packages = ["polymarket_edge_lab"]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.parquet", "tenacity"]
+ignore_missing_imports = true
