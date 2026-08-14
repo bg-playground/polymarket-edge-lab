@@ -31,7 +31,11 @@ def weighted_cost(rows: list[WindowMetric]) -> Decimal | None:
     if quantity == ZERO:
         return None
     cost = sum(
-        (row.weighted_pair_cost * row.paired_shares for row in usable),  # type: ignore[operator]
+        (
+            row.weighted_pair_cost * row.paired_shares
+            for row in usable
+            if row.weighted_pair_cost is not None
+        ),
         start=ZERO,
     )
     return cost / quantity
@@ -88,11 +92,15 @@ def classify(rows: list[WindowMetric]) -> Classification:
         return "insufficient_data"
     if pooled >= ONE:
         return "not_replicated"
-    below = sum(1 for row in adequate if row.weighted_pair_cost is not None and row.weighted_pair_cost < ONE)
+    below = sum(
+        1
+        for row in adequate
+        if row.weighted_pair_cost is not None and row.weighted_pair_cost < ONE
+    )
     fraction = Decimal(below) / Decimal(len(adequate))
     loo = leave_one_out(adequate)
     loo_below = all(
-        item["pooled_pair_cost"] is not None and item["pooled_pair_cost"] < ONE  # type: ignore[operator]
+        isinstance(item["pooled_pair_cost"], Decimal) and item["pooled_pair_cost"] < ONE
         for item in loo
     )
     if fraction >= Decimal("0.60") and loo_below:
@@ -108,7 +116,9 @@ def summarize_hypothesis(rows: list[WindowMetric]) -> dict[str, object]:
         and row.paired_shares >= ADEQUATE_SHARES
         and row.weighted_pair_cost is not None
     ]
-    costs = sorted(row.weighted_pair_cost for row in adequate if row.weighted_pair_cost is not None)
+    costs = sorted(
+        row.weighted_pair_cost for row in adequate if row.weighted_pair_cost is not None
+    )
     below_count = sum(1 for cost in costs if cost < ONE)
     total_quantity = sum((row.paired_shares for row in adequate), start=ZERO)
 
