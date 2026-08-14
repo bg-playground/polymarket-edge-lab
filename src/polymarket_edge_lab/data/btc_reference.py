@@ -66,7 +66,6 @@ def collect_coinbase_btc_usd(
     if granularity_seconds != 60:
         raise ValueError("Stage 3B currently supports Coinbase 60-second candles only")
 
-    # Coinbase caps a candle request at 300 buckets. Use 240-minute chunks with overlap.
     chunk_seconds = 240 * granularity_seconds
     raw_pages: list[dict[str, object]] = []
     by_epoch: dict[int, BtcCandle] = {}
@@ -75,7 +74,7 @@ def collect_coinbase_btc_usd(
     with httpx.Client(timeout=30.0, headers={"User-Agent": "polymarket-edge-lab/0.1"}) as client:
         while cursor < stop:
             chunk_end = min(cursor + chunk_seconds, stop)
-            params = {
+            params: dict[str, str | int] = {
                 "start": _iso(cursor),
                 "end": _iso(chunk_end),
                 "granularity": granularity_seconds,
