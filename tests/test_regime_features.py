@@ -52,9 +52,7 @@ def test_future_fill_does_not_change_current_feature_row() -> None:
         _row(trade_id="up", epoch=1060, side="UP", price="0.45", shares="5", seq=1),
         _row(trade_id="down", epoch=1100, side="DOWN", price="0.50", shares="5", seq=2),
     ]
-    future = _row(
-        trade_id="future", epoch=1150, side="UP", price="0.99", shares="100", seq=3
-    )
+    future = _row(trade_id="future", epoch=1150, side="UP", price="0.99", shares="100", seq=3)
     before = build_regime_features(base, [event], complete_market_ids={"m1"})
     after = build_regime_features(base + [future], [event], complete_market_ids={"m1"})
     assert before == after
