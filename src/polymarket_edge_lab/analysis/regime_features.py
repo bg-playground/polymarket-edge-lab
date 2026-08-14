@@ -63,9 +63,7 @@ def _seconds_since(now: datetime, then: datetime | None) -> int | None:
     return max(0, int((now - then).total_seconds()))
 
 
-def _trailing(
-    fills: deque[_FillState], now_epoch: int, seconds: int
-) -> tuple[int, Decimal]:
+def _trailing(fills: deque[_FillState], now_epoch: int, seconds: int) -> tuple[int, Decimal]:
     cutoff = now_epoch - seconds
     selected = [fill for fill in fills if fill.epoch >= cutoff]
     return len(selected), sum((fill.shares for fill in selected), start=ZERO)
