@@ -2,7 +2,7 @@
 
 The public Data API has a documented offset ceiling of 10 000 per query.
 For high-volume accounts (e.g. nagi777) the total trade count may far exceed
-this limit.  The API supports ``startTs`` / ``endTs`` epoch-second parameters
+this limit.  The API supports ``start`` / ``end`` epoch-second parameters
 that narrow a query to a specific time window.  By iterating over
 non-overlapping windows, each small enough to contain fewer than 10 000 trades,
 the full history is obtainable.
@@ -19,12 +19,12 @@ Strategy
 
 Time parameters
 ---------------
-The API's ``startTs``/``endTs`` parameters are documented as epoch **seconds**.
-The response ``timestamp`` field is assumed to be epoch **milliseconds** (see
-``normalization/trades.py`` and the plausibility guard therein).
+The API's ``start``/``end`` parameters are documented as epoch **seconds**.
+The response ``timestamp`` field is auto-detected as either epoch **seconds**
+or epoch **milliseconds** by magnitude (see ``normalization/trades.py``).
 
-TODO: Confirm parameter names (``startTs``/``endTs`` vs ``start``/``end``) and
-      the response timestamp unit against a live response.
+TODO: Live-verify ``start``/``end`` parameter behavior and the response
+      ``timestamp`` unit against an actual /trades response.
 
 Resumability
 ------------
@@ -154,14 +154,13 @@ async def collect_window(
 
     offset = 0
     while True:
-        if offset >= OFFSET_CEILING:
+        if offset > OFFSET_CEILING:
             logger.warning(
-                "Window [%d, %d): offset ceiling %d hit at offset %d — "
-                "consider subdividing this window.",
+                "Window [%d, %d): offset %d exceeds ceiling %d — consider subdividing this window.",
                 window_start,
                 window_end,
-                OFFSET_CEILING,
                 offset,
+                OFFSET_CEILING,
             )
             result.ceiling_hit = True
             break

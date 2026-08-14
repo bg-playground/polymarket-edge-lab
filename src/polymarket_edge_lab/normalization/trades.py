@@ -89,23 +89,27 @@ def _make_identity_hash(record: dict[str, Any]) -> str:
 
 
 def _parse_ms_to_utc(raw_ts: Any, field: str = "timestamp") -> datetime:
-    """Parse a Unix-milliseconds value (integer) to UTC datetime.
+    """Parse a Unix timestamp integer to UTC datetime, auto-detecting the unit.
 
-    The public Data API documentation is inconsistent: time-filter *parameters*
-    (``start``/``end``) are described in epoch **seconds**, but the response
-    ``timestamp`` field appears as a large integer consistent with epoch
-    **milliseconds** (values ~1.7 × 10¹²).  This function assumes
-    milliseconds and raises ``ValueError`` if the parsed result falls outside
-    the plausible Polymarket trading epoch (2019-10-01 → 2040-01-01) —
-    catching the common mistake of passing an epoch-seconds value that would
-    silently produce a 1970-era datetime.
+    The public Data API documentation does not explicitly state the unit of the
+    response ``timestamp`` field.  The time-filter parameters (``start``/``end``)
+    are documented in epoch **seconds**; the response ``timestamp`` could be
+    either seconds or milliseconds.
 
-    Schema status: unit confirmed against published fixture values
-    (1 723 634 400 000 ms = 2024-08-14 11:20:00 UTC).  The unit must be
-    re-verified against a live response before production use.
-    TODO: Confirm milliseconds vs. seconds with a live /trades response.
+    Unit auto-detection by magnitude (docs-verified; NOT live-confirmed):
+    - Values ≥ 1e11 (> year 5138 if seconds) → treated as **milliseconds**.
+      Example: 1_723_634_400_000 ms = 2024-08-14 11:20:00 UTC (✓ plausible).
+    - Values < 1e11 (≤ year 5138 if seconds) → treated as **seconds**.
+      Example: 1_723_634_400 s = 2024-08-14 11:20:00 UTC (✓ plausible).
+
+    Both paths are validated against the plausible Polymarket trading epoch
+    (2019-10-01 → 2040-01-01) so a corrupt or wrong-unit value is rejected
+    rather than silently stored with a 1970-era or far-future timestamp.
 
     Float values are rejected to avoid silent precision loss.
+
+    TODO: Live-verify the response ``timestamp`` unit against a real /trades
+    response and simplify this function to a single unit once confirmed.
 
     Raises ValueError for non-integer, unparseable, or out-of-plausible-range
     inputs.
@@ -113,19 +117,25 @@ def _parse_ms_to_utc(raw_ts: Any, field: str = "timestamp") -> datetime:
     if isinstance(raw_ts, float):
         raise ValueError(
             f"{field}: raw float values are rejected to avoid precision loss; "
-            f"got {raw_ts!r}. Pass as integer milliseconds."
+            f"got {raw_ts!r}. Pass as integer."
         )
     if isinstance(raw_ts, int):
-        ms = raw_ts
+        raw_int = raw_ts
     else:
         # String path — parse as integer.
         s = str(raw_ts).strip()
         try:
-            ms = int(s)
+            raw_int = int(s)
         except ValueError as exc:
-            raise ValueError(f"{field}: cannot parse as integer milliseconds: {raw_ts!r}") from exc
+            raise ValueError(f"{field}: cannot parse as integer: {raw_ts!r}") from exc
 
-    result = datetime.fromtimestamp(ms / 1000, tz=UTC)
+    # Auto-detect unit by magnitude.
+    # 1e11 seconds ≈ year 5138, so any value ≥ 1e11 is almost certainly ms.
+    if raw_int >= 100_000_000_000:
+        result = datetime.fromtimestamp(raw_int / 1000, tz=UTC)
+    else:
+        result = datetime.fromtimestamp(raw_int, tz=UTC)
+
     _check_timestamp_plausibility(result, raw_ts, field)
     return result
 

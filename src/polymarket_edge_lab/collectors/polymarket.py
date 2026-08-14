@@ -2,7 +2,7 @@
 
 Fetches paginated trade history from the official public Data API:
   GET https://data-api.polymarket.com/trades
-  Parameters: user, offset, limit[, startTs, endTs]
+  Parameters: user, offset, limit, takerOnly[, start, end]
 
 Separation of concerns:
   - This module handles HTTP transport only.
@@ -10,17 +10,21 @@ Separation of concerns:
   - Raw storage is in storage/raw.py.
   - The CLI orchestrator is in scripts/collect_historical_trades.py.
 
-API notes (verified 2026-08-14 from official docs; live response shape not
-confirmed due to network restriction — see tests/fixtures/README.md):
+API notes (docs-verified 2026-08-14; live response shape not confirmed due to
+network restriction — see tests/fixtures/README.md):
   - Response is a JSON array.
   - Pagination uses offset/limit; empty array signals end.
-  - Documented offset upper bound: 10 000 (see README Known Limitations).
-  - ``startTs`` / ``endTs`` epoch-second parameters narrow the query window;
+  - Documented offset upper bound: 10 000 (requests with offset > 10 000 are
+    rejected; see README Known Limitations).
+  - ``takerOnly`` defaults to ``true`` in the API; we explicitly send
+    ``takerOnly=false`` to include maker-side fills — required for complete
+    trade reconstruction.
+  - ``start`` / ``end`` epoch-second parameters narrow the query window;
     use these to bypass the offset ceiling for deep history.
   - Does not require authentication for public wallet addresses.
   - ``price`` and ``size`` are JSON numbers; parsed with parse_float=Decimal.
-TODO: Confirm parameter names (startTs/endTs vs start/end/startTime/endTime)
-      against a live response before production use.
+TODO: Live-verify parameter names (``start``/``end``) and ``takerOnly``
+      behavior against a real /trades response before production use.
 """
 
 from __future__ import annotations
@@ -37,8 +41,10 @@ logger = logging.getLogger(__name__)
 
 DATA_API_BASE = "https://data-api.polymarket.com"
 
-# Documented API offset ceiling.  The API may silently return empty results
-# past this bound.  Use time-window parameters (startTs/endTs) for deep history.
+# Documented API offset ceiling.  Requests with offset > OFFSET_CEILING are
+# rejected by the API.  Requests at exactly offset = OFFSET_CEILING are allowed
+# and must be made before concluding a window is exhausted.
+# Use time-window parameters (start/end) for deep history beyond this bound.
 OFFSET_CEILING = 10_000
 
 
@@ -87,12 +93,12 @@ class PolymarketPublicTradeCollector:
         limit:
             Maximum number of records per page.
         window_start:
-            Optional lower time bound as Unix epoch **seconds** (``startTs``
+            Optional lower time bound as Unix epoch **seconds** (``start``
             parameter).  When provided together with ``window_end``, results
             are restricted to ``[window_start, window_end)``, allowing full
             history retrieval across multiple non-overlapping windows.
         window_end:
-            Optional upper time bound as Unix epoch **seconds** (``endTs``
+            Optional upper time bound as Unix epoch **seconds** (``end``
             parameter).
 
         Returns
@@ -111,11 +117,18 @@ class PolymarketPublicTradeCollector:
             On non-2xx responses.
         """
         url = f"{self._base_url}/trades"
-        params: dict[str, str | int] = {"user": account, "offset": offset, "limit": limit}
+        params: dict[str, str | int] = {
+            "user": account,
+            "offset": offset,
+            "limit": limit,
+            # Explicitly request all fills (taker + maker).  The API default
+            # is takerOnly=true, which would omit maker-side fills.
+            "takerOnly": "false",
+        }
         if window_start is not None:
-            params["startTs"] = window_start
+            params["start"] = window_start
         if window_end is not None:
-            params["endTs"] = window_end
+            params["end"] = window_end
         if self._client is not None:
             response = await self._client.get(url, params=params)
         else:
@@ -139,9 +152,11 @@ class PolymarketPublicTradeCollector:
         window_start: int | None = None,
         window_end: int | None = None,
     ) -> str:
-        base = f"{self._base_url}/trades?user={account}&offset={offset}&limit={limit}"
+        base = (
+            f"{self._base_url}/trades?user={account}&offset={offset}&limit={limit}&takerOnly=false"
+        )
         if window_start is not None:
-            base += f"&startTs={window_start}"
+            base += f"&start={window_start}"
         if window_end is not None:
-            base += f"&endTs={window_end}"
+            base += f"&end={window_end}"
         return base

@@ -207,30 +207,38 @@ def test_raw_float_timestamp_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Timestamp plausibility guard (regression: unit mismatch detection)
+# Timestamp plausibility guard (regression: unit auto-detection)
 # ---------------------------------------------------------------------------
 
 
-def test_epoch_seconds_value_rejected_as_out_of_range() -> None:
-    """Epoch-seconds values (~1.7e9) produce 1970-era dates and must be rejected.
+def test_epoch_seconds_auto_detected_and_accepted() -> None:
+    """Epoch-seconds values ~1.7e9 are auto-detected as seconds and accepted.
 
-    This is the primary regression guard: if the live API returns seconds
-    instead of milliseconds, the record is rejected and logged rather than
-    silently stored with a wrong timestamp.
+    With the magnitude-based auto-detection: values < 1e11 are treated as
+    epoch seconds.  1_723_634_400 seconds = 2024-08-14 11:20:00 UTC, which is
+    inside the plausible trading epoch and must be accepted.
     """
-    # 1_723_634_400 seconds = 2024-08-14 (a plausible trade date), but treated
-    # as milliseconds it would be ~1973-01-01, well before the plausible epoch.
-    epoch_seconds_value = 1_723_634_400  # would be ~1973 if treated as ms
+    epoch_seconds_value = 1_723_634_400  # 2024-08-14T11:20:00 UTC
+    ts = _parse_ms_to_utc(epoch_seconds_value)
+    assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
+    assert _TS_MIN <= ts <= _TS_MAX
+
+
+def test_pre_2019_epoch_seconds_rejected_as_out_of_range() -> None:
+    """Epoch-seconds values before 2019-10-01 are auto-detected as seconds
+    but rejected because the date precedes the Polymarket launch epoch.
+
+    1_000_000_000 seconds = 2001-09-09 — well before platform launch.
+    """
     with pytest.raises(ValueError, match="plausible"):
-        _parse_ms_to_utc(epoch_seconds_value)
+        _parse_ms_to_utc(1_000_000_000)
 
 
 def test_realistic_ms_timestamp_accepted() -> None:
-    """A realistic live-sample millisecond timestamp must parse correctly.
+    """A realistic millisecond timestamp must parse correctly.
 
     Value 1_723_634_400_000 ms = 2024-08-14T11:20:00 UTC.
-    This is the fixture's first trade timestamp — confirmed from documented
-    fixture data.  It must always parse inside the plausible trading epoch.
+    Magnitude >= 1e11 → auto-detected as milliseconds.
     """
     ts = _parse_ms_to_utc(1_723_634_400_000)
     assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
@@ -246,14 +254,14 @@ def test_timestamp_plausibility_bounds_are_sane() -> None:
 
 def test_far_future_timestamp_rejected() -> None:
     """Timestamps beyond 2040 are rejected to guard against corrupt values."""
-    far_future_ms = 2_209_032_000_000  # 2040-01-02 in ms
+    far_future_ms = 2_209_032_000_000  # 2040-01-02 in ms → magnitude >= 1e11 → ms path
     with pytest.raises(ValueError, match="plausible"):
         _parse_ms_to_utc(far_future_ms)
 
 
-def test_normalized_record_epoch_seconds_rejected_end_to_end() -> None:
-    """Ensure epoch-seconds timestamp causes record rejection, not silent corruption."""
-    record = _make_trade(timestamp=1_723_634_400)  # seconds, not ms
+def test_normalized_record_pre2019_seconds_rejected_end_to_end() -> None:
+    """Ensure a pre-2019 epoch-seconds timestamp causes record rejection."""
+    record = _make_trade(timestamp=1_000_000_000)  # 2001-09-09 in seconds
     result = normalize_records([record], account=ACCOUNT)
     assert len(result.rejected) == 1
     assert "plausible" in result.rejected[0].reason
@@ -602,7 +610,78 @@ def test_pagination_stop_on_short_page() -> None:
     asyncio.run(_run())
 
 
-def test_pagination_resume_skips_completed_offsets() -> None:
+def test_fetch_page_sends_taker_only_false() -> None:
+    """Collector must send takerOnly=false to include maker-side fills."""
+    import asyncio
+
+    import httpx
+
+    captured_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Parse URL query params from the request.
+        for key, value in request.url.params.items():
+            captured_params[key] = value
+        return httpx.Response(200, text="[]", headers={"Content-Type": "application/json"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://data-api.polymarket.com")
+    collector = PolymarketPublicTradeCollector(client=client)
+
+    asyncio.run(collector.fetch_page(account="0xacc", offset=0, limit=10))
+    assert captured_params.get("takerOnly") == "false", (
+        "takerOnly=false must be sent on every request to include maker-side fills"
+    )
+
+
+def test_fetch_page_sends_start_end_not_startTs_endTs() -> None:
+    """Window parameters must be sent as 'start'/'end', not 'startTs'/'endTs'."""
+    import asyncio
+
+    import httpx
+
+    captured_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        for key, value in request.url.params.items():
+            captured_params[key] = value
+        return httpx.Response(200, text="[]", headers={"Content-Type": "application/json"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://data-api.polymarket.com")
+    collector = PolymarketPublicTradeCollector(client=client)
+
+    asyncio.run(
+        collector.fetch_page(
+            account="0xacc", offset=0, limit=10, window_start=1_000_000, window_end=2_000_000
+        )
+    )
+    assert "start" in captured_params, "window lower bound must be sent as 'start'"
+    assert "end" in captured_params, "window upper bound must be sent as 'end'"
+    assert "startTs" not in captured_params, "'startTs' is not the correct parameter name"
+    assert "endTs" not in captured_params, "'endTs' is not the correct parameter name"
+    assert captured_params["start"] == "1000000"
+    assert captured_params["end"] == "2000000"
+
+
+def test_endpoint_url_contains_taker_only_false() -> None:
+    """endpoint_url helper must include takerOnly=false for provenance."""
+    collector = PolymarketPublicTradeCollector()
+    url = collector.endpoint_url(account="0xacc", offset=0, limit=100)
+    assert "takerOnly=false" in url
+
+
+def test_endpoint_url_uses_start_end() -> None:
+    """endpoint_url must use 'start'/'end' parameter names."""
+    collector = PolymarketPublicTradeCollector()
+    url = collector.endpoint_url(
+        account="0xacc", offset=0, limit=100, window_start=1_000_000, window_end=2_000_000
+    )
+    assert "start=1000000" in url
+    assert "end=2000000" in url
+    assert "startTs" not in url
+    assert "endTs" not in url
+
     """Completed offsets from manifest are skipped without fetching."""
     import tempfile
 
@@ -832,6 +911,98 @@ def test_window_result_ceiling_hit_flag() -> None:
     assert wr.ceiling_hit is False
     wr2 = WindowResult(window_start=0, window_end=1000, ceiling_hit=True)
     assert wr2.ceiling_hit is True
+
+
+# ---------------------------------------------------------------------------
+# Offset ceiling boundary: offset=10000 is allowed; >10000 triggers ceiling
+# ---------------------------------------------------------------------------
+
+
+def test_collect_window_fetches_at_offset_10000() -> None:
+    """offset=10_000 is within the documented API limit and must be fetched.
+
+    The API rejects requests with offset > 10_000.  Requests at exactly
+    offset=10_000 are allowed and must not be skipped before they are made.
+    """
+    import asyncio
+
+    import httpx
+
+    from polymarket_edge_lab.collectors.windowed import collect_window
+
+    fetched_offsets: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", 0))
+        fetched_offsets.append(offset)
+        # Return a full page (page_size=10_000) at offset=0 so the loop
+        # naturally advances to offset=10_000.  Return empty at offset=10_000.
+        if offset == 0:
+            page = json.dumps([_make_trade(id=f"off0-t{i}") for i in range(10_000)], default=float)
+        else:
+            page = "[]"
+        return httpx.Response(200, text=page, headers={"Content-Type": "application/json"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://data-api.polymarket.com")
+    collector = PolymarketPublicTradeCollector(client=client)
+
+    result = asyncio.run(
+        collect_window(
+            collector,
+            account="0xacc",
+            window_start=1_000_000,
+            window_end=2_000_000,
+            page_size=10_000,
+            dry_run=True,
+        )
+    )
+    # offset=10_000 must have been fetched (not skipped by the ceiling guard).
+    assert 10_000 in fetched_offsets, (
+        f"offset=10_000 must be fetched (allowed by API); fetched: {fetched_offsets}"
+    )
+    # No ceiling hit — the window was exhausted naturally (empty page at 10_000).
+    assert result.ceiling_hit is False
+
+
+def test_collect_window_ceiling_hit_when_offset_exceeds_10000() -> None:
+    """ceiling_hit is set when the next offset would exceed 10_000.
+
+    If a full page at offset=10_000 is returned, the loop would next advance
+    to offset=10_500 (> OFFSET_CEILING=10_000), triggering ceiling_hit.
+    """
+    import asyncio
+
+    import httpx
+
+    from polymarket_edge_lab.collectors.polymarket import OFFSET_CEILING
+    from polymarket_edge_lab.collectors.windowed import collect_window
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Always return a full page so the loop keeps advancing.
+        page = json.dumps([_make_trade(id=f"t{i}") for i in range(500)], default=float)
+        return httpx.Response(200, text=page, headers={"Content-Type": "application/json"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://data-api.polymarket.com")
+    collector = PolymarketPublicTradeCollector(client=client)
+
+    result = asyncio.run(
+        collect_window(
+            collector,
+            account="0xacc",
+            window_start=1_000_000,
+            window_end=2_000_000,
+            page_size=500,
+            dry_run=True,
+        )
+    )
+    # The loop must stop once offset would exceed OFFSET_CEILING.
+    assert result.ceiling_hit is True
+    # Last allowed offset is OFFSET_CEILING (10_000); offset > 10_000 must not be fetched.
+    total_accepted = result.total_accepted
+    # With page_size=500, offsets 0,500,...,10000 = 21 pages × 500 = 10500 records
+    assert total_accepted == (OFFSET_CEILING // 500 + 1) * 500
 
 
 # Ensure collector imports work.
