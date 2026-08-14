@@ -3,7 +3,7 @@ from decimal import Decimal
 from polymarket_edge_lab.analysis.btc_features import BtcCandle, build_btc_features
 
 
-def _candle(epoch: int, price: str) -> BtcCandle:
+def _candle(epoch: int, price: str, *, interval_seconds: int = 1) -> BtcCandle:
     value = Decimal(price)
     return BtcCandle(
         open_epoch=epoch,
@@ -11,6 +11,7 @@ def _candle(epoch: int, price: str) -> BtcCandle:
         high=value + Decimal("1"),
         low=value - Decimal("1"),
         close=value,
+        interval_seconds=interval_seconds,
     )
 
 
@@ -33,3 +34,15 @@ def test_candle_closing_after_event_is_excluded() -> None:
     )
     assert result.reference_epoch == 1001
     assert result.reference_price == Decimal("100")
+
+
+def test_60_second_candle_is_not_visible_before_close() -> None:
+    candles = [
+        _candle(1000, "100", interval_seconds=60),
+        _candle(1060, "101", interval_seconds=60),
+    ]
+    before_close = build_btc_features(candles, event_epoch=1059, market_start_epoch=1000)
+    at_close = build_btc_features(candles, event_epoch=1060, market_start_epoch=1000)
+    assert before_close.reference_epoch is None
+    assert at_close.reference_epoch == 1060
+    assert at_close.reference_price == Decimal("100")
