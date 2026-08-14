@@ -1,0 +1,46 @@
+name: Empirical validation — nagi777
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - empirical-validation-nagi777
+
+permissions:
+  contents: read
+
+jobs:
+  validate-live-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: pip install -e ".[dev]"
+
+      - name: Run live Polymarket API validation
+        run: |
+          mkdir -p validation-artifacts
+          python scripts/validate_live_api.py \
+            --account 0xbf337426aa856996b8bb79b238345dd1a0276bf7 \
+            --output validation-artifacts/LIVE_API_VALIDATION.md
+          cat validation-artifacts/LIVE_API_VALIDATION.md
+
+      - name: Fail if validation is blocked
+        run: |
+          if grep -q "\*\*BLOCKED\*\*" validation-artifacts/LIVE_API_VALIDATION.md; then
+            echo "Live API validation is blocked; refusing to treat this run as empirical evidence."
+            exit 1
+          fi
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nagi777-live-api-validation
+          path: validation-artifacts/LIVE_API_VALIDATION.md
+          if-no-files-found: error
+          retention-days: 30

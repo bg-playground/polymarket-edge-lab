@@ -2,11 +2,11 @@
   "targets": {
     "nagi777": {
       "nickname": "nagi777",
-      "proxy_wallet": null,
-      "verification_status": "blocked",
-      "verification_source": "Public Polymarket profile verification required at https://polymarket.com/profile/nagi777 (blocked from current sandbox).",
-      "verification_date_utc": null,
-      "notes": "Do not guess this address. Populate from directly observed public profile evidence in a network-enabled environment."
+      "proxy_wallet": "0xbf337426aa856996b8bb79b238345dd1a0276bf7",
+      "verification_status": "verified",
+      "verification_source": "Public Polymarket profile resolves nagi777 to wallet 0xbf337426aa856996b8bb79b238345dd1a0276bf7; independently corroborated by Struct explorer; live Polymarket Data API validation succeeded from GitHub Actions run 31824104881.",
+      "verification_date_utc": "2026-08-14",
+      "notes": "Verified for empirical research. Preserve raw API/profile evidence and continue completeness checks during historical collection."
     }
   }
 }
