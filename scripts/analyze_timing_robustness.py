@@ -83,9 +83,7 @@ def main() -> None:
             {
                 **window,
                 "eligible_market_count": report.get("eligible_market_count") if report else None,
-                "fifo_full_cohort": (
-                    report["accounting_methods"].get("fifo") if report else None
-                ),
+                "fifo_full_cohort": (report["accounting_methods"].get("fifo") if report else None),
                 "primary_latency": latency_row,
                 "primary_market_time": market_time_row,
             }

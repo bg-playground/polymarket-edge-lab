@@ -93,9 +93,7 @@ def classify(rows: list[WindowMetric]) -> Classification:
     if pooled >= ONE:
         return "not_replicated"
     below = sum(
-        1
-        for row in adequate
-        if row.weighted_pair_cost is not None and row.weighted_pair_cost < ONE
+        1 for row in adequate if row.weighted_pair_cost is not None and row.weighted_pair_cost < ONE
     )
     fraction = Decimal(below) / Decimal(len(adequate))
     loo = leave_one_out(adequate)
@@ -116,9 +114,7 @@ def summarize_hypothesis(rows: list[WindowMetric]) -> dict[str, object]:
         and row.paired_shares >= ADEQUATE_SHARES
         and row.weighted_pair_cost is not None
     ]
-    costs = sorted(
-        row.weighted_pair_cost for row in adequate if row.weighted_pair_cost is not None
-    )
+    costs = sorted(row.weighted_pair_cost for row in adequate if row.weighted_pair_cost is not None)
     below_count = sum(1 for cost in costs if cost < ONE)
     total_quantity = sum((row.paired_shares for row in adequate), start=ZERO)
 
