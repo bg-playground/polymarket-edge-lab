@@ -42,7 +42,9 @@ def _cents(value: Decimal | None) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bounded empirical pair sensitivity and latency analysis")
+    parser = argparse.ArgumentParser(
+        description="Bounded empirical pair sensitivity and latency analysis"
+    )
     parser.add_argument("--account", required=True)
     parser.add_argument("--duckdb-path", type=Path, required=True)
     parser.add_argument("--collection-start", type=int, required=True)
@@ -58,7 +60,9 @@ def main() -> None:
     )
     ledger = build_canonical_ledger(trades, complete_market_ids=complete_ids)
     events_by_method, sell_markets = pair_events_by_method(ledger, complete_market_ids=complete_ids)
-    summaries = {method: summarize_events(method, events) for method, events in events_by_method.items()}
+    summaries = {
+        method: summarize_events(method, events) for method, events in events_by_method.items()
+    }
     market_rows = per_market_metrics(events_by_method)
 
     fifo_events = events_by_method["fifo"]
@@ -87,7 +91,8 @@ def main() -> None:
         for method, summary in summaries.items()
     }
     full_cohort_near_claim = any(
-        distance is not None and distance <= Decimal("0.005") for distance in claim_distance.values()
+        distance is not None and distance <= Decimal("0.005")
+        for distance in claim_distance.values()
     )
 
     payload = {
@@ -118,8 +123,12 @@ def main() -> None:
     }
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "pair_sensitivity.json").write_text(json.dumps(_json(payload), indent=2), encoding="utf-8")
-    (args.output_dir / "per_market_metrics.json").write_text(json.dumps(_json(market_rows), indent=2), encoding="utf-8")
+    (args.output_dir / "pair_sensitivity.json").write_text(
+        json.dumps(_json(payload), indent=2), encoding="utf-8"
+    )
+    (args.output_dir / "per_market_metrics.json").write_text(
+        json.dumps(_json(market_rows), indent=2), encoding="utf-8"
+    )
     event_payload = {
         method: [asdict(event) for event in events] for method, events in events_by_method.items()
     }
@@ -131,10 +140,16 @@ def main() -> None:
     lifo = summaries["lifo"]
     wav = summaries["weighted_average"]
     profitable_latency = [
-        row for row in latency if isinstance(row.get("weighted_pair_cost"), Decimal) and row["weighted_pair_cost"] < Decimal("1")
+        row
+        for row in latency
+        if isinstance(row.get("weighted_pair_cost"), Decimal)
+        and row["weighted_pair_cost"] < Decimal("1")
     ]
     profitable_time = [
-        row for row in time_buckets if isinstance(row.get("weighted_pair_cost"), Decimal) and row["weighted_pair_cost"] < Decimal("1")
+        row
+        for row in time_buckets
+        if isinstance(row.get("weighted_pair_cost"), Decimal)
+        and row["weighted_pair_cost"] < Decimal("1")
     ]
     lines = [
         "# Empirical pair sensitivity and latency analysis",

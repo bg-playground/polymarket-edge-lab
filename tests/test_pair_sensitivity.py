@@ -62,7 +62,21 @@ def test_weighted_average_uses_current_inventory_only() -> None:
 
 def test_latency_bucket_boundaries() -> None:
     values = [0, 1, 2, 5, 6, 15, 16, 30, 31, 60, 61, 120, 121]
-    expected = ["0s", "1s", "2-5s", "2-5s", "6-15s", "6-15s", "16-30s", "16-30s", "31-60s", "31-60s", "61-120s", "61-120s", ">120s"]
+    expected = [
+        "0s",
+        "1s",
+        "2-5s",
+        "2-5s",
+        "6-15s",
+        "6-15s",
+        "16-30s",
+        "16-30s",
+        "31-60s",
+        "31-60s",
+        "61-120s",
+        "61-120s",
+        ">120s",
+    ]
     assert [latency_bucket(v) for v in values] == expected
     assert tuple(dict.fromkeys(expected)) == LATENCY_BUCKETS
 

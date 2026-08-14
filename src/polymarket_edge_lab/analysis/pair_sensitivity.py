@@ -123,7 +123,9 @@ def _event(
     )
 
 
-def _lot_pair_market(rows: list[LedgerEntry], *, method: Literal["fifo", "lifo"]) -> list[SensitivityPairEvent]:
+def _lot_pair_market(
+    rows: list[LedgerEntry], *, method: Literal["fifo", "lifo"]
+) -> list[SensitivityPairEvent]:
     lots: dict[str, deque[tuple[Decimal, Decimal, object]]] = {
         "UP": deque(),
         "DOWN": deque(),
@@ -238,7 +240,9 @@ def summarize_events(method: str, events: list[SensitivityPairEvent]) -> MethodS
     )
 
 
-def _bucket_metrics(events: list[SensitivityPairEvent], labels: tuple[str, ...], key_fn: object) -> list[dict[str, object]]:
+def _bucket_metrics(
+    events: list[SensitivityPairEvent], labels: tuple[str, ...], key_fn: object
+) -> list[dict[str, object]]:
     grouped: dict[str, list[SensitivityPairEvent]] = {label: [] for label in labels}
     for event in events:
         label = key_fn(event)  # type: ignore[operator]
@@ -253,9 +257,13 @@ def _bucket_metrics(events: list[SensitivityPairEvent], labels: tuple[str, ...],
         edge = None
         below = None
         if qty > ZERO:
-            pair_cost = sum((e.pair_cost * e.paired_shares for e in bucket_events), start=ZERO) / qty
+            pair_cost = (
+                sum((e.pair_cost * e.paired_shares for e in bucket_events), start=ZERO) / qty
+            )
             edge = ONE - pair_cost
-            below_qty = sum((e.paired_shares for e in bucket_events if e.pair_cost < ONE), start=ZERO)
+            below_qty = sum(
+                (e.paired_shares for e in bucket_events if e.pair_cost < ONE), start=ZERO
+            )
             below = below_qty / qty
         rows.append(
             {
@@ -279,7 +287,9 @@ def latency_metrics(events: list[SensitivityPairEvent]) -> list[dict[str, object
     )
 
 
-def market_time_metrics(events: list[SensitivityPairEvent]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def market_time_metrics(
+    events: list[SensitivityPairEvent],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     buckets = _bucket_metrics(
         events,
         TIME_BUCKETS,
@@ -293,12 +303,16 @@ def market_time_metrics(events: list[SensitivityPairEvent]) -> tuple[list[dict[s
     return buckets, bands
 
 
-def per_market_metrics(events_by_method: dict[str, list[SensitivityPairEvent]]) -> list[dict[str, object]]:
+def per_market_metrics(
+    events_by_method: dict[str, list[SensitivityPairEvent]],
+) -> list[dict[str, object]]:
     market_ids = sorted({e.market_id for events in events_by_method.values() for e in events})
     rows: list[dict[str, object]] = []
     for market_id in market_ids:
         row: dict[str, object] = {"market_id": market_id}
-        sample = next(e for events in events_by_method.values() for e in events if e.market_id == market_id)
+        sample = next(
+            e for events in events_by_method.values() for e in events if e.market_id == market_id
+        )
         row["slug"] = sample.slug
         start = btc_5m_market_start(sample.slug)
         row["market_start_epoch"] = start
@@ -313,11 +327,23 @@ def per_market_metrics(events_by_method: dict[str, list[SensitivityPairEvent]]) 
 
 def distribution(values: list[Decimal]) -> dict[str, Decimal | int | None]:
     if not values:
-        return {"count": 0, "mean": None, "median": None, "p10": None, "p25": None, "p75": None, "p90": None, "min": None, "max": None}
+        return {
+            "count": 0,
+            "mean": None,
+            "median": None,
+            "p10": None,
+            "p25": None,
+            "p75": None,
+            "p90": None,
+            "min": None,
+            "max": None,
+        }
     ordered = sorted(values)
+
     def percentile(p: Decimal) -> Decimal:
         index = int((Decimal(len(ordered) - 1) * p).to_integral_value(rounding="ROUND_HALF_UP"))
         return ordered[index]
+
     return {
         "count": len(values),
         "mean": sum(values, start=ZERO) / Decimal(len(values)),
@@ -331,7 +357,9 @@ def distribution(values: list[Decimal]) -> dict[str, Decimal | int | None]:
     }
 
 
-def transaction_hash_diagnostic(ledger: list[LedgerEntry], complete_market_ids: set[str]) -> dict[str, object]:
+def transaction_hash_diagnostic(
+    ledger: list[LedgerEntry], complete_market_ids: set[str]
+) -> dict[str, object]:
     grouped, sell_markets = _rows_by_market(ledger, complete_market_ids)
     hashes: dict[str, list[LedgerEntry]] = defaultdict(list)
     for market_id, rows in grouped.items():
