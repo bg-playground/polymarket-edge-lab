@@ -78,6 +78,7 @@ from polymarket_edge_lab.collectors.windowed import (
 from polymarket_edge_lab.normalization.trades import normalize_records
 from polymarket_edge_lab.storage.normalized import write_duckdb, write_parquet
 from polymarket_edge_lab.storage.raw import completed_offsets, write_raw_page
+from polymarket_edge_lab.validation.completeness import summarize_window_completeness
 from polymarket_edge_lab.validation.report import build_report
 
 logging.basicConfig(
@@ -141,6 +142,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_WINDOW_SECONDS,
         help=f"Window size in seconds (default: {DEFAULT_WINDOW_SECONDS} = 30 days).",
     )
+    p.add_argument(
+        "--min-window-seconds",
+        type=int,
+        default=3600,
+        help="Minimum window size for automatic subdivision when ceiling is hit.",
+    )
     return p.parse_args(argv)
 
 
@@ -182,6 +189,7 @@ async def run_windowed(args: argparse.Namespace) -> int:
             raw_dir=raw_dir if not dry_run else None,
             force=force,
             dry_run=dry_run,
+            min_window_seconds=args.min_window_seconds,
         )
     except Exception as exc:
         logger.error("Fatal error during windowed collection: %s", exc)
@@ -233,12 +241,27 @@ async def run_windowed(args: argparse.Namespace) -> int:
     )
     print(report.summary())
 
+    completeness = summarize_window_completeness(window_results)
+    print(
+        "\n=== Window Completeness ===\n"
+        f"  Windows attempted     : {completeness.windows_attempted}\n"
+        f"  Windows complete      : {completeness.windows_complete}\n"
+        f"  Windows unresolved    : {completeness.windows_unresolved}\n"
+        f"  Complete history gate : {completeness.complete}"
+    )
+    if completeness.unresolved_windows:
+        print("  Unresolved windows:")
+        for ws, we in completeness.unresolved_windows:
+            print(f"    - [{ws}, {we})")
+
     if ceiling_windows:
         print(
             f"\nWARNING: {len(ceiling_windows)} window(s) hit the offset ceiling. "
             "Re-run with a smaller --window-seconds to retrieve all records."
         )
 
+    if not completeness.complete:
+        return 2
     return 0 if report.is_clean or len(all_accepted) > 0 else 1
 
 
@@ -280,7 +303,7 @@ async def run(args: argparse.Namespace) -> int:
             logger.info("Reached --limit=%d, stopping.", record_limit)
             break
 
-        if offset >= OFFSET_CEILING:
+        if offset > OFFSET_CEILING:
             offset_ceiling_hit = True
             logger.warning(
                 "Offset %d has reached the documented API ceiling of %d. "
