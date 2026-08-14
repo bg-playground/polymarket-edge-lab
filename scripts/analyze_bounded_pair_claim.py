@@ -103,7 +103,10 @@ def main() -> None:
             "This is a bounded cohort, not the trader's full history.",
             "Public API timestamps have one-second resolution; sub-second ordering is unknown.",
             "Markets containing SELL fills are excluded from this BUY-lot pairing method.",
-            "Pair costs are gross execution-price sums and do not include fees or settlement effects.",
+            (
+                "Pair costs are gross execution-price sums and do not include fees or "
+                "settlement effects."
+            ),
         ],
     }
 
@@ -111,10 +114,7 @@ def main() -> None:
     (args.output_dir / "bounded_pair_claim.json").write_text(
         json.dumps(payload, indent=2), encoding="utf-8"
     )
-    event_rows = [
-        {k: _json_value(v) for k, v in asdict(event).items()}
-        for event in events
-    ]
+    event_rows = [{k: _json_value(v) for k, v in asdict(event).items()} for event in events]
     (args.output_dir / "pair_formation_events.json").write_text(
         json.dumps(event_rows, indent=2), encoding="utf-8"
     )
@@ -134,7 +134,10 @@ def main() -> None:
         f"- Included fills: **{canonical.fill_count}**",
         f"- Pair-match fragments: **{canonical.pair_fragment_count}**",
         f"- Formed pair quantity: **{canonical.paired_shares}** shares",
-        f"- Markets excluded because SELL fills were present: **{len(canonical.excluded_sell_markets)}**",
+        (
+            "- Markets excluded because SELL fills were present: "
+            f"**{len(canonical.excluded_sell_markets)}**"
+        ),
         "",
         "## Chronological pair-formation result",
         "",
@@ -150,20 +153,34 @@ def main() -> None:
         "",
         "## X-post comparison",
         "",
-        f"- Claimed average pair cost: **98.4300¢**",
-        f"- Claimed gross paired edge: **1.5700¢**",
+        "- Claimed average pair cost: **98.4300¢**",
+        "- Claimed gross paired edge: **1.5700¢**",
         f"- Bounded-cohort status: **{status}**",
         "",
-        "This status applies only to this fully-contained bounded cohort; it is not a full-history verdict.",
+        (
+            "This status applies only to this fully-contained bounded cohort; "
+            "it is not a full-history verdict."
+        ),
         "",
         "## Limitations",
         "",
-        "- Public timestamps have one-second resolution, so exact sub-second fill ordering is unavailable.",
-        "- This pairing method matches newly purchased shares FIFO against previously unmatched complementary BUY lots.",
-        "- Markets with SELL fills are excluded rather than forcing a more speculative lot-accounting rule.",
+        (
+            "- Public timestamps have one-second resolution, so exact sub-second fill "
+            "ordering is unavailable."
+        ),
+        (
+            "- This pairing method matches newly purchased shares FIFO against previously "
+            "unmatched complementary BUY lots."
+        ),
+        (
+            "- Markets with SELL fills are excluded rather than forcing a more speculative "
+            "lot-accounting rule."
+        ),
         "- Fees and settlement effects are not included in the gross execution-price pair cost.",
     ]
-    (args.output_dir / "bounded_pair_claim.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (args.output_dir / "bounded_pair_claim.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
     print("\n".join(lines))
 
