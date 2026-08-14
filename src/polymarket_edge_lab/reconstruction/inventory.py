@@ -26,15 +26,22 @@ class _OutcomeInventory:
         self.buy_cost += shares * price
         self.shares_bought += shares
 
-    def apply_sell(self, shares: Decimal) -> None:
+    def apply_sell(self, shares: Decimal) -> Decimal | None:
+        available_long = max(self.net_shares, ZERO)
         avg = self.weighted_avg_buy_cost
         self.net_shares -= shares
         self.shares_sold += shares
+        remaining_long = max(self.net_shares, ZERO)
         if avg is not None:
-            reduced = avg * shares
-            self.buy_cost = max(self.buy_cost - reduced, ZERO)
-        if self.net_shares <= ZERO:
+            self.buy_cost = avg * remaining_long
+        elif self.net_shares <= ZERO:
             self.buy_cost = ZERO
+        if self.net_shares == ZERO:
+            self.buy_cost = ZERO
+
+        if shares > available_long:
+            return shares - available_long
+        return None
 
 
 def reconstruct_inventory(ledger: list[LedgerEntry]) -> dict[str, list[InventoryEvent]]:
@@ -55,10 +62,13 @@ def reconstruct_inventory(ledger: list[LedgerEntry]) -> dict[str, list[Inventory
             if not row.eligible_binary_market or row.normalized_outcome_side is None:
                 continue
             inv = up if row.normalized_outcome_side == "UP" else down
+            inventory_anomaly_reason: str | None = None
             if row.side == "BUY":
                 inv.apply_buy(row.shares, row.price)
             else:
-                inv.apply_sell(row.shares)
+                oversold_shares = inv.apply_sell(row.shares)
+                if oversold_shares is not None:
+                    inventory_anomaly_reason = f"sell_exceeds_long_inventory_by={oversold_shares}"
 
             up_pos = max(up.net_shares, ZERO)
             down_pos = max(down.net_shares, ZERO)
@@ -92,6 +102,7 @@ def reconstruct_inventory(ledger: list[LedgerEntry]) -> dict[str, list[Inventory
                     down_buy_cost=down.buy_cost,
                     up_weighted_avg_buy_cost=up.weighted_avg_buy_cost,
                     down_weighted_avg_buy_cost=down.weighted_avg_buy_cost,
+                    inventory_anomaly_reason=inventory_anomaly_reason,
                 )
             )
 

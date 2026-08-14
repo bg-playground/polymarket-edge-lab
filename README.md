@@ -226,7 +226,9 @@ Report paths:
 
 Accounting conventions:
 - Primary pair-cost method: weighted-average inventory accounting at pair-increase events.
+- Portfolio-level pair-cost claim metric: pair-quantity-weighted mean over complete eligible markets.
 - Secondary sensitivity: FIFO cost of final paired inventory.
+- Pair-formation flow is reported separately as gross positive paired-inventory deltas; ending paired inventory is reported independently.
 - Gross pair edge: `1 - pair_cost`.
 - Exposure metrics: event/share-weighted, end-of-market, and dollar-cost-weighted.
 

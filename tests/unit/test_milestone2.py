@@ -10,6 +10,7 @@ from polymarket_edge_lab.analysis.claim_validation import (
 )
 from polymarket_edge_lab.analysis.trading_activity import summarize_trading_activity
 from polymarket_edge_lab.collectors.windowed import WindowResult, collect_windowed
+from polymarket_edge_lab.models.reconstruction import MarketSummary
 from polymarket_edge_lab.models.trade import NormalizedTrade
 from polymarket_edge_lab.reconstruction.exposure import summarize_exposure
 from polymarket_edge_lab.reconstruction.inventory import reconstruct_inventory
@@ -200,6 +201,87 @@ def test_inventory_sell_reduces_and_partial_pairing() -> None:
     assert events[2].paired_shares == Decimal("6")
     assert events[2].directional_side == "UP"
     assert events[2].directional_shares == Decimal("1")
+    assert events[2].up_buy_cost == Decimal("2.8")
+    assert events[2].up_weighted_avg_buy_cost == Decimal("0.4")
+    assert events[2].inventory_anomaly_reason is None
+
+
+def test_inventory_exact_liquidation_zeroes_carry_cost() -> None:
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    trades = [
+        _trade(
+            trade_id="1",
+            market_id="m1",
+            outcome="UP",
+            side="BUY",
+            price="0.40",
+            shares="10",
+            timestamp=ts,
+        ),
+        _trade(
+            trade_id="2",
+            market_id="m1",
+            outcome="DOWN",
+            side="BUY",
+            price="0.60",
+            shares="1",
+            timestamp=ts + timedelta(milliseconds=500),
+        ),
+        _trade(
+            trade_id="3",
+            market_id="m1",
+            outcome="UP",
+            side="SELL",
+            price="0.50",
+            shares="10",
+            timestamp=ts + timedelta(seconds=1),
+        ),
+    ]
+    ledger = build_canonical_ledger(trades, complete_market_ids={"m1"})
+    events = reconstruct_inventory(ledger)["m1"]
+    assert events[-1].up_inventory == Decimal("0")
+    assert events[-1].up_buy_cost == Decimal("0")
+    assert events[-1].up_weighted_avg_buy_cost is None
+    assert events[-1].inventory_anomaly_reason is None
+
+
+def test_inventory_oversell_surfaces_anomaly_and_short_state() -> None:
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    trades = [
+        _trade(
+            trade_id="1",
+            market_id="m1",
+            outcome="UP",
+            side="BUY",
+            price="0.40",
+            shares="10",
+            timestamp=ts,
+        ),
+        _trade(
+            trade_id="2",
+            market_id="m1",
+            outcome="DOWN",
+            side="BUY",
+            price="0.60",
+            shares="1",
+            timestamp=ts + timedelta(milliseconds=500),
+        ),
+        _trade(
+            trade_id="3",
+            market_id="m1",
+            outcome="UP",
+            side="SELL",
+            price="0.50",
+            shares="12",
+            timestamp=ts + timedelta(seconds=1),
+        ),
+    ]
+    ledger = build_canonical_ledger(trades, complete_market_ids={"m1"})
+    events = reconstruct_inventory(ledger)["m1"]
+    assert events[-1].up_inventory == Decimal("-2")
+    assert events[-1].up_buy_cost == Decimal("0")
+    assert events[-1].up_weighted_avg_buy_cost is None
+    assert events[-1].inventory_anomaly_reason == "sell_exceeds_long_inventory_by=2"
 
 
 def test_fifo_pair_cost_sensitivity_present() -> None:
@@ -238,6 +320,71 @@ def test_fifo_pair_cost_sensitivity_present() -> None:
     pairing = summarize_pair_accounting("m1", events)
     assert pairing.fifo_pair_cost is not None
     assert pairing.fifo_gross_pair_edge == Decimal("1") - pairing.fifo_pair_cost
+
+
+def test_pair_formation_flow_handles_unwind_reform() -> None:
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    trades = [
+        _trade(
+            trade_id="1",
+            market_id="m1",
+            outcome="UP",
+            side="BUY",
+            price="0.4",
+            shares="100",
+            timestamp=ts,
+        ),
+        _trade(
+            trade_id="2",
+            market_id="m1",
+            outcome="DOWN",
+            side="BUY",
+            price="0.6",
+            shares="100",
+            timestamp=ts + timedelta(seconds=1),
+        ),
+        _trade(
+            trade_id="3",
+            market_id="m1",
+            outcome="UP",
+            side="BUY",
+            price="0.4",
+            shares="50",
+            timestamp=ts + timedelta(seconds=2),
+        ),
+        _trade(
+            trade_id="4",
+            market_id="m1",
+            outcome="DOWN",
+            side="BUY",
+            price="0.6",
+            shares="50",
+            timestamp=ts + timedelta(seconds=3),
+        ),
+        _trade(
+            trade_id="5",
+            market_id="m1",
+            outcome="DOWN",
+            side="SELL",
+            price="0.6",
+            shares="100",
+            timestamp=ts + timedelta(seconds=4),
+        ),
+        _trade(
+            trade_id="6",
+            market_id="m1",
+            outcome="DOWN",
+            side="BUY",
+            price="0.6",
+            shares="100",
+            timestamp=ts + timedelta(seconds=5),
+        ),
+    ]
+    ledger = build_canonical_ledger(trades, complete_market_ids={"m1"})
+    events = reconstruct_inventory(ledger)["m1"]
+    pairing = summarize_pair_accounting("m1", events)
+    assert pairing.gross_pair_formation_shares == Decimal("250")
+    assert pairing.ending_paired_shares == Decimal("150")
 
 
 def test_exposure_metrics() -> None:
@@ -342,6 +489,67 @@ def test_claim_report_markdown_deterministic() -> None:
     md = claim_results_to_markdown(claims)
     assert "| Public claim | Measured result |" in md
     assert "98.43¢ average pair cost" in md
+
+
+def test_claim_pair_cost_is_quantity_weighted_primary() -> None:
+    ts = datetime(2026, 1, 1, tzinfo=UTC)
+    market_summaries = [
+        MarketSummary(
+            market_id="m1",
+            first_trade_timestamp=ts,
+            last_trade_timestamp=ts,
+            fill_count=2,
+            total_buy_notional=Decimal("1"),
+            total_sell_notional=Decimal("0"),
+            ending_up_shares=Decimal("1"),
+            ending_down_shares=Decimal("1"),
+            max_paired_shares=Decimal("1"),
+            ending_paired_shares=Decimal("1"),
+            ending_directional_side=None,
+            ending_directional_shares=Decimal("0"),
+            weighted_avg_up_cost=Decimal("0.49"),
+            weighted_avg_down_cost=Decimal("0.49"),
+            weighted_pair_cost=Decimal("0.98"),
+            weighted_gross_pair_edge=Decimal("0.02"),
+            fifo_pair_cost=Decimal("0.98"),
+            fifo_gross_pair_edge=Decimal("0.02"),
+            history_complete=True,
+            validation_warnings=[],
+        ),
+        MarketSummary(
+            market_id="m2",
+            first_trade_timestamp=ts,
+            last_trade_timestamp=ts,
+            fill_count=20000,
+            total_buy_notional=Decimal("9800"),
+            total_sell_notional=Decimal("0"),
+            ending_up_shares=Decimal("10000"),
+            ending_down_shares=Decimal("10000"),
+            max_paired_shares=Decimal("10000"),
+            ending_paired_shares=Decimal("10000"),
+            ending_directional_side=None,
+            ending_directional_shares=Decimal("0"),
+            weighted_avg_up_cost=Decimal("0.485"),
+            weighted_avg_down_cost=Decimal("0.495"),
+            weighted_pair_cost=Decimal("0.99"),
+            weighted_gross_pair_edge=Decimal("0.01"),
+            fifo_pair_cost=Decimal("0.99"),
+            fifo_gross_pair_edge=Decimal("0.01"),
+            history_complete=True,
+            validation_warnings=[],
+        ),
+    ]
+    claims = build_claim_results(
+        activity=summarize_trading_activity([]),
+        exposure=summarize_exposure([]),
+        market_summaries=market_summaries,
+    )
+    pair_cost = [c for c in claims if c.claim == "98.43¢ average pair cost"][0]
+    pair_edge = [c for c in claims if c.claim == "1.57¢ gross paired edge"][0]
+    assert pair_cost.measured_value == "0.9899990000999900009999000100"
+    assert pair_cost.sample_size == "10001"
+    assert "secondary unweighted market mean=0.985" in pair_cost.caveats
+    assert pair_edge.measured_value == "0.0100009999000099990000999900"
 
 
 class _SubdivideCollector:

@@ -30,22 +30,39 @@ def build_claim_results(
     market_summaries: list[MarketSummary],
 ) -> list[ClaimResult]:
     complete_markets = [m for m in market_summaries if m.history_complete]
-    pair_cost_markets = [m for m in complete_markets if m.weighted_pair_cost is not None]
+    pair_cost_markets = [
+        m
+        for m in complete_markets
+        if m.weighted_pair_cost is not None and m.ending_paired_shares > Decimal("0")
+    ]
 
     avg_pair_cost = None
+    total_paired_shares = sum(
+        (m.ending_paired_shares for m in pair_cost_markets),
+        start=Decimal("0"),
+    )
+    if pair_cost_markets and total_paired_shares > Decimal("0"):
+        weighted_total_cost = sum(
+            (
+                m.weighted_pair_cost * m.ending_paired_shares
+                for m in pair_cost_markets
+                if m.weighted_pair_cost is not None
+            ),
+            start=Decimal("0"),
+        )
+        avg_pair_cost = weighted_total_cost / total_paired_shares
+
+    avg_pair_edge = None
+    if avg_pair_cost is not None:
+        avg_pair_edge = Decimal("1") - avg_pair_cost
+
+    unweighted_avg_pair_cost = None
     if pair_cost_markets:
         costs = [
             m.weighted_pair_cost for m in pair_cost_markets if m.weighted_pair_cost is not None
         ]
         if costs:
-            avg_pair_cost = sum(costs, start=Decimal("0")) / Decimal(len(costs))
-
-    avg_pair_edge = None
-    if pair_cost_markets:
-        edges = [m.weighted_gross_pair_edge for m in pair_cost_markets]
-        valid_edges = [e for e in edges if e is not None]
-        if valid_edges:
-            avg_pair_edge = sum(valid_edges, start=Decimal("0")) / Decimal(len(valid_edges))
+            unweighted_avg_pair_cost = sum(costs, start=Decimal("0")) / Decimal(len(costs))
 
     paired_ratio = exposure.paired_share_event_ratio
     directional_ratio = exposure.directional_share_event_ratio
@@ -82,16 +99,26 @@ def build_claim_results(
         ClaimResult(
             claim="98.43¢ average pair cost",
             measured_value=str(avg_pair_cost),
-            methodology="mean weighted-average pair cost over complete eligible markets",
-            sample_size=str(len(pair_cost_markets)),
-            caveats="excludes incomplete-history markets",
+            methodology=(
+                "pair-quantity-weighted mean weighted-average "
+                "pair cost over complete eligible markets"
+            ),
+            sample_size=str(total_paired_shares),
+            caveats=(
+                "excludes incomplete-history markets; "
+                f"secondary unweighted market mean={unweighted_avg_pair_cost} across "
+                f"{len(pair_cost_markets)} markets"
+            ),
             status=_status_from_target(avg_pair_cost, Decimal("0.9843"), Decimal("0.005")),
         ),
         ClaimResult(
             claim="1.57¢ gross paired edge",
             measured_value=str(avg_pair_edge),
-            methodology="mean (1 - weighted pair cost) over complete eligible markets",
-            sample_size=str(len(pair_cost_markets)),
+            methodology=(
+                "1 - pair-quantity-weighted mean weighted-average "
+                "pair cost over complete eligible markets"
+            ),
+            sample_size=str(total_paired_shares),
             caveats="excludes incomplete-history markets",
             status=_status_from_target(avg_pair_edge, Decimal("0.0157"), Decimal("0.005")),
         ),

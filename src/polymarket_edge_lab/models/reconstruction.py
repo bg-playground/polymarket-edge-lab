@@ -55,12 +55,14 @@ class InventoryEvent:
     down_buy_cost: Decimal
     up_weighted_avg_buy_cost: Decimal | None
     down_weighted_avg_buy_cost: Decimal | None
+    inventory_anomaly_reason: str | None = None
 
 
 @dataclass(frozen=True)
 class PairAccountingSummary:
     market_id: str
-    paired_shares_formed: Decimal
+    gross_pair_formation_shares: Decimal
+    ending_paired_shares: Decimal
     weighted_pair_cost: Decimal | None
     weighted_gross_pair_edge: Decimal | None
     fifo_pair_cost: Decimal | None

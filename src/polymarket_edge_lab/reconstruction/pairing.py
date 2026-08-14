@@ -50,7 +50,8 @@ def summarize_pair_accounting(
     if not events:
         return PairAccountingSummary(
             market_id=market_id,
-            paired_shares_formed=ZERO,
+            gross_pair_formation_shares=ZERO,
+            ending_paired_shares=ZERO,
             weighted_pair_cost=None,
             weighted_gross_pair_edge=None,
             fifo_pair_cost=None,
@@ -58,11 +59,11 @@ def summarize_pair_accounting(
         )
 
     prev_paired = ZERO
-    paired_shares_formed = ZERO
+    gross_pair_formation_shares = ZERO
 
     for event in events:
         if event.paired_shares > prev_paired:
-            paired_shares_formed += event.paired_shares - prev_paired
+            gross_pair_formation_shares += event.paired_shares - prev_paired
         prev_paired = event.paired_shares
 
     final = events[-1]
@@ -86,7 +87,8 @@ def summarize_pair_accounting(
 
     return PairAccountingSummary(
         market_id=market_id,
-        paired_shares_formed=paired_shares_formed,
+        gross_pair_formation_shares=gross_pair_formation_shares,
+        ending_paired_shares=final_pair_qty,
         weighted_pair_cost=weighted_pair_cost,
         weighted_gross_pair_edge=weighted_gross_edge,
         fifo_pair_cost=fifo_pair_cost,
