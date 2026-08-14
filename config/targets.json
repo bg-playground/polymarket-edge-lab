@@ -3,10 +3,10 @@
     "nagi777": {
       "nickname": "nagi777",
       "proxy_wallet": "0xbf337426aa856996b8bb79b238345dd1a0276bf7",
-      "verification_status": "provisionally_verified",
-      "verification_source": "Public Polymarket profile resolves nagi777 to wallet 0xbf337426aa856996b8bb79b238345dd1a0276bf7; independently corroborated by Struct explorer. Empirical API validation still required before final verification.",
+      "verification_status": "verified",
+      "verification_source": "Public Polymarket profile resolves nagi777 to wallet 0xbf337426aa856996b8bb79b238345dd1a0276bf7; independently corroborated by Struct explorer; live Polymarket Data API validation succeeded from GitHub Actions run 31824104881.",
       "verification_date_utc": "2026-08-14",
-      "notes": "Use this address for empirical validation. Promote verification_status to verified only after the live Data API response and profile identity are captured in reproducible evidence."
+      "notes": "Verified for empirical research. Preserve raw API/profile evidence and continue completeness checks during historical collection."
     }
   }
 }
