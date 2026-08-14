@@ -20,19 +20,36 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
+      - name: Apply targeted typing fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/polymarket_edge_lab/analysis/pair_sensitivity.py')
+          text = path.read_text()
+          text = text.replace(
+              'from decimal import Decimal\n',
+              'from datetime import datetime\nfrom decimal import Decimal\n',
+          )
+          text = text.replace(
+              '    last_ts = {"UP": None, "DOWN": None}\n',
+              '    last_ts: dict[str, datetime | None] = {"UP": None, "DOWN": None}\n',
+          )
+          path.write_text(text)
+          PY
       - name: Apply repository formatting
         run: |
           ruff format .
           ruff check --fix . || true
-      - name: Commit formatting if needed
+      - name: Commit changes if needed
         shell: bash
         run: |
           if git diff --quiet; then
-            echo "No formatting changes needed"
+            echo "No changes needed"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "style: format empirical sensitivity analysis"
+          git commit -m "fix(analysis): type weighted-average timestamps"
           git push origin HEAD:empirical-pair-sensitivity-latency
