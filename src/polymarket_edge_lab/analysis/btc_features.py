@@ -113,7 +113,7 @@ def build_btc_features(
         if market_candles and start_price not in {None, ZERO}:
             high = max(candle.high for candle in market_candles)
             low = min(candle.low for candle in market_candles)
-            range_since_start = (high - low) / start_price  # type: ignore[operator]
+            range_since_start = (high - low) / start_price
 
     return BtcFeatureRow(
         event_epoch=event_epoch,
