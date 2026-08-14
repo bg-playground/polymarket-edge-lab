@@ -54,6 +54,19 @@ def _parse_rows(payload: Any, *, interval_seconds: int = 60) -> list[BtcCandle]:
     return sorted(candles, key=lambda candle: candle.open_epoch)
 
 
+def load_coinbase_candles(raw_path: Path, *, interval_seconds: int = 60) -> list[BtcCandle]:
+    raw_pages = json.loads(raw_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_pages, list):
+        raise ValueError("Preserved Coinbase evidence must be a list of pages")
+    by_epoch: dict[int, BtcCandle] = {}
+    for page in raw_pages:
+        if not isinstance(page, dict) or "payload" not in page:
+            raise ValueError("Unexpected preserved Coinbase page")
+        for candle in _parse_rows(page["payload"], interval_seconds=interval_seconds):
+            by_epoch[candle.open_epoch] = candle
+    return sorted(by_epoch.values(), key=lambda candle: candle.open_epoch)
+
+
 def collect_coinbase_btc_usd(
     *,
     start_epoch: int,
