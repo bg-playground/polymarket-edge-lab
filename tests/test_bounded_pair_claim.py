@@ -116,9 +116,7 @@ def test_chronological_fifo_pair_formation_cost() -> None:
     ]
     complete = {"m1"}
     ledger = build_canonical_ledger(trades, complete_market_ids=complete)
-    summary, events = summarize_chronological_pair_formation(
-        ledger, complete_market_ids=complete
-    )
+    summary, events = summarize_chronological_pair_formation(ledger, complete_market_ids=complete)
     assert summary.market_count == 1
     assert summary.paired_shares == Decimal("10")
     assert summary.weighted_pair_cost == Decimal("0.92")
@@ -158,9 +156,7 @@ def test_sell_market_is_excluded_from_buy_lot_pair_claim() -> None:
         ),
     ]
     ledger = build_canonical_ledger(trades, complete_market_ids={"m1"})
-    summary, events = summarize_chronological_pair_formation(
-        ledger, complete_market_ids={"m1"}
-    )
+    summary, events = summarize_chronological_pair_formation(ledger, complete_market_ids={"m1"})
     assert summary.market_count == 0
     assert summary.excluded_sell_markets == ("m1",)
     assert summary.weighted_pair_cost is None
