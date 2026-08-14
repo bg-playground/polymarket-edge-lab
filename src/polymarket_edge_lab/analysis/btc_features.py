@@ -53,11 +53,7 @@ def _close_at_or_before(candles: list[BtcCandle], epoch: int) -> Decimal | None:
 
 
 def _returns(candles: list[BtcCandle], start_epoch: int, end_epoch: int) -> list[Decimal]:
-    selected = [
-        candle.close
-        for candle in candles
-        if start_epoch < candle.open_epoch + 1 <= end_epoch
-    ]
+    selected = [candle.close for candle in candles if start_epoch < candle.open_epoch + 1 <= end_epoch]
     returns: list[Decimal] = []
     for left, right in zip(selected, selected[1:], strict=False):
         value = _safe_return(right, left)
@@ -99,18 +95,12 @@ def build_btc_features(
 
     ret60 = trailing_return(60)
     start_price = (
-        _close_at_or_before(causal, market_start_epoch)
-        if market_start_epoch is not None
-        else None
+        _close_at_or_before(causal, market_start_epoch) if market_start_epoch is not None else None
     )
     since_start = _safe_return(current, start_price)
     range_since_start = None
     if market_start_epoch is not None:
-        market_candles = [
-            candle
-            for candle in causal
-            if candle.open_epoch + 1 >= market_start_epoch
-        ]
+        market_candles = [candle for candle in causal if candle.open_epoch + 1 >= market_start_epoch]
         if market_candles and start_price not in {None, ZERO}:
             high = max(candle.high for candle in market_candles)
             low = min(candle.low for candle in market_candles)
