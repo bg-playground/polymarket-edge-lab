@@ -61,6 +61,16 @@ jobs:
             --duckdb-path data/bounded.duckdb \
             --output-dir reports/incomplete-safe
 
+      - name: Analyze fully-contained BTC 5m pair-formation cohort
+        run: |
+          python scripts/analyze_bounded_pair_claim.py \
+            --account 0xbf337426aa856996b8bb79b238345dd1a0276bf7 \
+            --duckdb-path data/bounded.duckdb \
+            --collection-start ${{ steps.bounds.outputs.start }} \
+            --collection-end ${{ steps.bounds.outputs.end }} \
+            --output-dir reports/bounded-claim-grade \
+            | tee evidence/bounded_pair_claim.log
+
       - name: Mechanical accounting smoke test with explicit completeness assumption
         run: |
           python scripts/reconstruct_trader.py \
@@ -73,19 +83,19 @@ jobs:
       - name: Write bounded-run evidence note
         shell: bash
         run: |
-          cat > evidence/BOUNDED_RUN_NOT_CLAIM_GRADE.md <<EOF
+          cat > evidence/BOUNDED_RUN_SCOPE.md <<EOF
           # Bounded real-data reconstruction run
 
           Account: \`0xbf337426aa856996b8bb79b238345dd1a0276bf7\`
 
           UTC epoch interval: \`${{ steps.bounds.outputs.start }}\` to \`${{ steps.bounds.outputs.end }}\` (6 hours).
 
-          This run is an empirical pipeline validation slice, **not a claim-grade historical analysis**.
-
           - Data collection is maker-inclusive and time-window bounded.
-          - \`reports/incomplete-safe\` deliberately leaves market-history completeness unresolved.
-          - \`reports/smoke-assumed-complete\` explicitly assumes slice markets are complete solely to exercise inventory/pair-accounting code on real records. Metrics from that directory must not be used to validate the X-post claims.
-          - Full claim validation requires complete per-market history and a complete account-history collection strategy.
+          - \`reports/incomplete-safe\` deliberately leaves general market-history completeness unresolved.
+          - \`reports/bounded-claim-grade\` treats only observed \`btc-updown-5m-<epoch>\` markets whose complete five-minute interval lies inside the collection interval as complete. Its pair-cost result is claim-grade for that bounded cohort only, not for the trader's full history.
+          - Chronological pair formation matches complementary BUY lots FIFO. Markets containing SELL fills are excluded from that bounded pair-cost method.
+          - Public timestamps are second-resolution, so within-second price-order sensitivity is reported separately.
+          - \`reports/smoke-assumed-complete\` remains a mechanical-only output and must not be used for claim validation.
           EOF
 
       - name: Summarize artifact contents
