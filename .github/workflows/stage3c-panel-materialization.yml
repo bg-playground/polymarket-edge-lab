@@ -1,0 +1,109 @@
+name: Milestone 3C panel materialization
+
+on:
+  push:
+    branches:
+      - milestone-3c-panel-materialization
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  panel-materialization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: pip install -e ".[dev]"
+      - name: Run deterministic tests
+        run: pytest -q
+      - name: Define frozen seven-day panel
+        run: |
+          mkdir -p evidence/stage3c data/stage3c reports/stage3c
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          windows = []
+          for day in range(7, 14):
+              start = int(datetime(2026, 8, day, 12, 0, tzinfo=timezone.utc).timestamp())
+              windows.append({
+                  "window_id": f"2026-08-{day:02d}T12-18Z",
+                  "start_epoch": start,
+                  "end_epoch": start + 21600,
+              })
+          with open("evidence/stage3c/window_manifest.json", "w", encoding="utf-8") as handle:
+              json.dump({"windows": windows}, handle, indent=2)
+          PY
+      - name: Collect independent BTC reference data
+        run: |
+          START=$(python -c 'import json; print(json.load(open("evidence/stage3c/window_manifest.json"))["windows"][0]["start_epoch"] - 300)')
+          END=$(python -c 'import json; print(json.load(open("evidence/stage3c/window_manifest.json"))["windows"][-1]["end_epoch"])')
+          python scripts/collect_btc_reference.py \
+            --start "$START" --end "$END" \
+            --raw evidence/stage3c/coinbase-btc-usd-60s-raw.json \
+            --provenance evidence/stage3c/coinbase-btc-usd-60s-provenance.json
+      - name: Collect frozen Polymarket windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCOUNT=0xbf337426aa856996b8bb79b238345dd1a0276bf7
+          python - <<'PY' > /tmp/windows.tsv
+          import json
+          data = json.load(open("evidence/stage3c/window_manifest.json", encoding="utf-8"))
+          for w in data["windows"]:
+              print(w["window_id"], w["start_epoch"], w["end_epoch"], sep="\t")
+          PY
+          while IFS=$'\t' read -r WINDOW START END; do
+            echo "=== $WINDOW [$START, $END) ==="
+            mkdir -p "data/stage3c/$WINDOW/raw" "data/stage3c/$WINDOW/normalized"
+            python scripts/collect_historical_trades.py \
+              --account "$ACCOUNT" \
+              --windowed \
+              --global-start "$START" \
+              --global-end "$END" \
+              --window-seconds 3600 \
+              --min-window-seconds 300 \
+              --page-size 500 \
+              --raw-dir "data/stage3c/$WINDOW/raw" \
+              --normalized-dir "data/stage3c/$WINDOW/normalized" \
+              --duckdb-path "data/stage3c/$WINDOW/window.duckdb" \
+              2>&1 | tee "evidence/stage3c/$WINDOW-collection.log"
+          done < /tmp/windows.tsv
+      - name: Materialize causal joined feature panel
+        run: |
+          python scripts/materialize_stage3c_panel.py \
+            --account 0xbf337426aa856996b8bb79b238345dd1a0276bf7 \
+            --manifest evidence/stage3c/window_manifest.json \
+            --data-root data/stage3c \
+            --btc-raw evidence/stage3c/coinbase-btc-usd-60s-raw.json \
+            --output-dir reports/stage3c \
+            | tee evidence/stage3c/materialization.log
+      - name: Assert BTC resolution guardrails
+        run: |
+          python - <<'PY'
+          import pyarrow.parquet as pq
+          table = pq.read_table("reports/stage3c/stage3c_feature_panel.parquet")
+          data = table.to_pydict()
+          assert all(value is None for value in data["btc_return_15s"])
+          assert all(value is None for value in data["btc_return_30s"])
+          assert all(value is None for value in data["btc_realized_vol_30s"])
+          refs = data["btc_reference_epoch"]
+          events = data["formed_at_epoch"]
+          assert all(ref is None or ref <= event for ref, event in zip(refs, events, strict=True))
+          print(f"validated causal BTC alignment for {len(events)} panel rows")
+          PY
+      - name: Upload Stage 3C evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-3c-panel-materialization
+          path: |
+            evidence/stage3c/
+            reports/stage3c/
+            data/stage3c/*/normalized/
+          if-no-files-found: error
+          retention-days: 30
