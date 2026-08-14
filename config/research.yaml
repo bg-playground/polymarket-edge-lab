@@ -1,0 +1,23 @@
+project:
+  name: polymarket-edge-lab
+  phase: milestone-1
+
+target:
+  nickname: nagi777
+  account: null
+
+collection:
+  preserve_raw_payloads: true
+  page_size: 100
+  request_timeout_seconds: 30
+  max_retries: 4
+
+storage:
+  raw_dir: data/raw
+  normalized_dir: data/normalized
+  duckdb_path: data/polymarket_edge_lab.duckdb
+
+validation:
+  reject_missing_required_fields: true
+  detect_duplicates: true
+  require_utc_timestamps: true
