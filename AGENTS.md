@@ -1,26 +1,33 @@
 # Agent Instructions
 
-Read `docs/RESEARCH_PLAN.md` for the overall project direction, `docs/MILESTONE_2_SPEC.md` for the forensic-reconstruction milestone, and `docs/EMPIRICAL_PAIR_SENSITIVITY_SPEC.md` for the current empirical extension.
+Read `docs/RESEARCH_PLAN.md` for the overall project direction, `docs/MILESTONE_2_SPEC.md` for the forensic-reconstruction milestone, `docs/EMPIRICAL_PAIR_SENSITIVITY_SPEC.md` for the merged sensitivity phase, and `docs/EMPIRICAL_TIMING_ROBUSTNESS_SPEC.md` for the current phase.
 
 ## Current scope
 
-Milestone 2 forensic reconstruction is implemented and the project is now in an **empirical pair-accounting sensitivity and timing-analysis checkpoint before Milestone 3**.
+Milestone 2 forensic reconstruction and the first bounded pair-sensitivity analysis are implemented. The project is now in an **out-of-sample empirical timing-robustness phase before Milestone 3**.
 
-Reuse the existing collectors, raw storage, normalization, validation, DuckDB/Parquet, canonical ledger, inventory reconstruction, bounded BTC 5-minute cohort selection, FIFO pair-formation analysis, and CI infrastructure rather than replacing them.
+Reuse the existing collectors, raw storage, normalization, validation, DuckDB/Parquet, canonical ledger, inventory reconstruction, bounded BTC 5-minute cohort selection, FIFO/LIFO/weighted-average pair accounting, latency analysis, market-time analysis, transaction-hash diagnostics, and CI/workflow infrastructure rather than replacing them.
 
-The current phase is explicitly authorized to add LIFO sensitivity, incremental weighted-average pair accounting, per-market distributions, complementary-fill latency analysis, time-within-market analysis, and transaction-hash grouping diagnostics as defined in `docs/EMPIRICAL_PAIR_SENSITIVITY_SPEC.md`.
+The current phase is explicitly authorized to expand those analyses across multiple independent, non-overlapping historical windows and to compute robustness/stability statistics as defined in `docs/EMPIRICAL_TIMING_ROBUSTNESS_SPEC.md`.
 
 Do not move ahead to strategy inference, backtesting, machine learning, LangGraph, or live trading unless the repository owner explicitly changes this file.
 
+## Frozen primary empirical hypotheses
+
+1. FIFO pair formation with a 61-120 second complementary-fill lag remains below $1 across the expanded independent-window sample.
+2. FIFO pair formation during market seconds 100-199 remains below $1 across the expanded independent-window sample.
+
+These hypotheses and their bucket definitions must not be changed after observing expanded data.
+
 ## Current empirical objectives
 
-1. Keep chronological FIFO complementary BUY-lot matching as the primary bounded historical baseline.
-2. Add LIFO and weighted-average accounting as predeclared sensitivities over the identical eligible cohort.
-3. Explain pair-cost variation across markets and accounting definitions.
-4. Measure whether profitable pair formation is concentrated by complementary-fill lag.
-5. Measure whether profitable pair formation is concentrated by time within each BTC 5-minute market.
-6. Diagnose transaction-hash grouping without treating a transaction hash as an order identifier.
-7. Test whether the public 98.43c pair-cost / 1.57c edge claim is robustly supported under standard definitions without optimizing toward the claim.
+1. Collect and reconstruct a materially larger set of independent, non-overlapping windows.
+2. Preserve per-window completeness evidence and exact UTC boundaries.
+3. Reproduce full-cohort FIFO/LIFO/weighted-average accounting for every window.
+4. Reproduce the existing fixed latency and market-time bucket metrics for every window.
+5. Evaluate the two frozen timing hypotheses with pooled, equal-window, leave-one-out, and cumulative statistics.
+6. Classify each primary hypothesis conservatively as replicated, mixed, not_replicated, or insufficient_data under the predeclared rules.
+7. Keep all other timing buckets descriptive secondary results only.
 
 ## Required behavior
 
@@ -31,12 +38,13 @@ Do not move ahead to strategy inference, backtesting, machine learning, LangGrap
 - Use `Decimal` for prices, sizes, costs, and accounting boundaries.
 - Keep exact token/asset IDs and condition/market IDs.
 - Treat maker-inclusive collection (`takerOnly=false`) as mandatory for forensic completeness.
-- Detect and report gaps, duplicate ambiguities, rejected rows, and any window that cannot be proven complete.
+- Detect and report gaps, duplicate ambiguities, rejected rows, incomplete windows, and any window that cannot be proven complete.
 - Do not silently repair ambiguous records.
 - Keep raw source provenance traceable from every reconstructed result.
-- Add tests for every inventory, accounting, and bucket-boundary rule.
-- Keep identical cohort/inclusion rules across accounting methods.
-- Never discard expensive pair events because they weaken an apparent edge.
+- Never overlap windows in the primary study panel.
+- Never discard expensive markets or windows because they weaken an apparent edge.
+- Keep existing cohort and SELL-exclusion rules consistent across windows and methods.
+- Add deterministic tests for all aggregation, threshold, and classification rules.
 - Keep secrets and private wallet material out of source control.
 - Update documentation when behavior changes.
 
@@ -79,23 +87,24 @@ Do not implement:
 5. Numeric prices, sizes, costs, and P&L must avoid binary floating-point accounting.
 6. Duplicate detection must be deterministic and its limitations documented.
 7. Unknown or conflicting API semantics must be surfaced as validation failures/TODOs rather than guessed.
-8. A market may only be marked `complete_history=true` when its source windows/pages can be shown to have exhausted normally without unresolved ceiling/gap warnings.
+8. A market or window may only be treated as complete when its source windows/pages can be shown to have exhausted normally without unresolved ceiling/gap warnings.
 9. Pairing calculations must never use future information to improve apparent historical acquisition cost.
-10. FIFO remains the primary lot-matching baseline; LIFO and theoretical optimized matching may only be reported as clearly labeled sensitivities.
-11. A narrow latency/time bucket matching the public claim is not evidence that the full-cohort claim is supported.
-12. Public one-second timestamps do not justify claims about sub-second fill ordering.
+10. FIFO remains the primary lot-matching baseline; LIFO is sensitivity only.
+11. The primary timing hypotheses are frozen before expanded data is observed.
+12. A secondary bucket that appears attractive in this phase remains descriptive and may not be promoted without a new out-of-sample phase.
+13. Public one-second timestamps do not justify claims about sub-second fill ordering.
 
 ## Definition of done for the current empirical checkpoint
 
 A pull request is not complete until:
 
 - all CI checks pass;
-- the same bounded cohort is used across all accounting methods;
-- FIFO, LIFO, and weighted-average results are reported side by side;
-- per-market distributions are reproducible;
-- latency and time-within-market bucket boundaries are explicit and tested;
-- transaction-hash diagnostics are labeled conservatively;
-- one-second ordering sensitivity is preserved;
-- machine-readable and human-readable reports are included in the bounded workflow artifact;
-- the public 98.43c claim is assessed without cherry-picking or optimized matching;
-- limitations clearly distinguish measured execution-price accounting from strategy inference or actual realized P&L.
+- multiple independent non-overlapping windows are collected and their completeness is explicit;
+- achieved study size and deviations from the target design are documented;
+- per-window FIFO/LIFO/weighted-average results are reproducible;
+- the exact existing latency and market-time buckets are reused unchanged;
+- the two frozen timing hypotheses are evaluated using the predeclared robustness statistics;
+- leave-one-window-out and cumulative estimates are reported;
+- replication classifications follow the spec without discretionary overrides;
+- machine-readable and human-readable reports are included in the workflow artifact;
+- limitations clearly distinguish historical execution-price robustness from strategy inference or future profitability.
