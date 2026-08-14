@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from decimal import Decimal
 from statistics import median
 from typing import Literal
@@ -168,7 +169,7 @@ def _lot_pair_market(
 def _weighted_average_market(rows: list[LedgerEntry]) -> list[SensitivityPairEvent]:
     qty = {"UP": ZERO, "DOWN": ZERO}
     cost = {"UP": ZERO, "DOWN": ZERO}
-    last_ts = {"UP": None, "DOWN": None}
+    last_ts: dict[str, datetime | None] = {"UP": None, "DOWN": None}
     paired_before = ZERO
     events: list[SensitivityPairEvent] = []
     for row in sorted(rows, key=lambda r: (r.timestamp, r.fill_sequence_number)):
