@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "row_semantics": "FIFO pair-formation event at formed_at_epoch",
+  "predictive_feature_rule": "Only information observable at or before formed_at_epoch is permitted.",
+  "feature_groups": {
+    "timing": [
+      "lag_seconds",
+      "elapsed_seconds",
+      "seconds_remaining"
+    ],
+    "inventory": [
+      "up_inventory",
+      "down_inventory",
+      "paired_inventory",
+      "residual_inventory",
+      "inventory_imbalance",
+      "cumulative_up_vwap",
+      "cumulative_down_vwap",
+      "implied_complete_set_cost",
+      "seconds_since_last_up_fill",
+      "seconds_since_last_down_fill",
+      "fill_count_15s",
+      "fill_count_30s",
+      "fill_count_60s",
+      "fill_qty_15s",
+      "fill_qty_30s",
+      "fill_qty_60s",
+      "side_switches_60s",
+      "cumulative_paired_quantity",
+      "same_second_fill_count"
+    ],
+    "btc": [
+      "btc_return_15s",
+      "btc_return_30s",
+      "btc_return_60s",
+      "btc_return_120s",
+      "btc_realized_vol_30s",
+      "btc_realized_vol_60s",
+      "btc_realized_vol_120s",
+      "btc_absolute_return_60s",
+      "btc_return_since_market_start",
+      "btc_range_since_market_start"
+    ]
+  },
+  "targets": {
+    "pair_cost": "FIFO acquisition price sum for newly formed paired quantity",
+    "favorable": "pair_cost < 1.00",
+    "strong_favorable": "pair_cost <= 0.98"
+  },
+  "retrospective_only": [
+    "eventual_market_winner",
+    "eventual_total_market_inventory",
+    "future_paired_quantity",
+    "market_end_vwap",
+    "final_residual_inventory"
+  ],
+  "btc_timestamp_semantics": "A one-second candle is usable only after its close timestamp; future candles are excluded.",
+  "null_behavior": "Insufficient trailing history or missing causal reference data yields null; values are never forward-filled from the future."
+}
