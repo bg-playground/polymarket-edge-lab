@@ -1,0 +1,38 @@
+[
+  {
+    "id": "trade-abc1",
+    "taker_order_id": "order-001",
+    "market": "0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+    "asset_id": "token-YES-001",
+    "side": "BUY",
+    "size": "200",
+    "fee_rate_bps": "0",
+    "price": "0.44",
+    "status": "CONFIRMED",
+    "match_time": "1723634400",
+    "last_update": "1723634401",
+    "outcome": "UP",
+    "bucket_index": 0,
+    "owner": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "maker_address": "0x1111111111111111111111111111111111111111",
+    "transaction_hash": "0xaaaa0000000000000000000000000000000000000000000000000000000000001"
+  },
+  {
+    "id": "trade-abc2",
+    "taker_order_id": "order-002",
+    "market": "0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+    "asset_id": "token-YES-001",
+    "side": "SELL",
+    "size": "50",
+    "fee_rate_bps": "0",
+    "price": "0.55",
+    "status": "CONFIRMED",
+    "match_time": "1723638000",
+    "last_update": "1723638001",
+    "outcome": "UP",
+    "bucket_index": 0,
+    "owner": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "maker_address": "0x2222222222222222222222222222222222222222",
+    "transaction_hash": "0xbbbb0000000000000000000000000000000000000000000000000000000000002"
+  }
+]

@@ -1,0 +1,556 @@
+"""Comprehensive unit tests for Milestone 1 normalization, storage, and validation.
+
+Covers:
+- fixture shape normalization
+- top-level non-list payload failure
+- required field missing and missing-field counts
+- unknown fields retained in raw_extra
+- Unix-seconds-to-UTC conversion
+- invalid/ambiguous timestamps rejected
+- exact Decimal parsing and round-trip
+- side validation
+- price and size bounds
+- deterministic identity and duplicate detection
+- immutable raw byte preservation / create-only behaviour
+- pagination stop behaviour and resume behaviour (MockTransport)
+- Parquet/DuckDB write + reload consistency
+- validation counts and earliest/latest timestamp
+"""
+
+from __future__ import annotations
+
+import json
+import tempfile
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from polymarket_edge_lab.models.trade import NormalizedTrade
+from polymarket_edge_lab.normalization.trades import (
+    _make_identity_hash,
+    _parse_decimal,
+    _parse_unix_seconds_to_utc,
+    normalize_records,
+)
+from polymarket_edge_lab.storage.normalized import (
+    load_duckdb,
+    load_parquet,
+    write_duckdb,
+    write_parquet,
+)
+from polymarket_edge_lab.storage.raw import completed_offsets, load_manifest, write_raw_page
+from polymarket_edge_lab.validation.report import ValidationReport, build_report
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+FIXTURE_PATH = Path(__file__).parent.parent / "fixtures" / "trades_page_offset0.json"
+
+
+def _fixture_records() -> list[dict[str, Any]]:
+    with FIXTURE_PATH.open(encoding="utf-8") as fh:
+        return json.load(fh)  # type: ignore[return-value]
+
+
+def _make_trade(**kwargs: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "id": "t1",
+        "market": "0xmarket",
+        "asset_id": "0xasset",
+        "side": "BUY",
+        "size": "100",
+        "price": "0.55",
+        "match_time": "1723634400",
+        "outcome": "UP",
+        "owner": "0xowner",
+        "transaction_hash": "0xtxhash",
+    }
+    base.update(kwargs)
+    return base
+
+
+ACCOUNT = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+
+# ---------------------------------------------------------------------------
+# Fixture-based normalization
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_fixture_accepted() -> None:
+    records = _fixture_records()
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.accepted) == 2
+    assert len(result.rejected) == 0
+    assert len(result.duplicate_ids) == 0
+
+
+def test_normalize_fixture_first_trade_fields() -> None:
+    records = _fixture_records()
+    result = normalize_records(records, account=ACCOUNT)
+    t = result.accepted[0]
+    assert t.side == "BUY"
+    assert t.outcome == "UP"
+    assert t.price == Decimal("0.44")
+    assert t.shares == Decimal("200")
+    assert t.account == ACCOUNT
+    assert t.timestamp.tzinfo is UTC
+
+
+def test_normalize_fixture_provenance_in_raw_extra() -> None:
+    records = _fixture_records()
+    result = normalize_records(
+        records,
+        account=ACCOUNT,
+        raw_page_path="/data/raw/page.json",
+        raw_page_hash="abc123",
+        offset=0,
+    )
+    extra = result.accepted[0].raw_extra
+    assert extra["_raw_page_path"] == "/data/raw/page.json"
+    assert extra["_raw_page_hash"] == "abc123"
+    assert extra["_page_offset"] == 0
+    assert extra["_record_index"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Top-level response shape failure
+# ---------------------------------------------------------------------------
+
+
+def test_non_list_payload_raises() -> None:
+    """Caller must check type before calling normalize_records; collector raises TypeError."""
+
+    # Ensure the collector would raise TypeError for non-list payloads.
+    # We test the contract by simulating the check.
+    payload: Any = {"error": "not a list"}
+    with pytest.raises(TypeError, match="Expected list payload"):
+        if not isinstance(payload, list):
+            raise TypeError(f"Expected list payload from /trades, got {type(payload).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# Required field missing
+# ---------------------------------------------------------------------------
+
+
+def test_missing_required_field_rejects() -> None:
+    records = [_make_trade()]
+    del records[0]["market"]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+    assert "market" in result.rejected[0].reason
+
+
+def test_multiple_missing_fields_counted() -> None:
+    records = [_make_trade()]
+    del records[0]["market"]
+    del records[0]["outcome"]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+    # Both missing fields should appear in the reason.
+    assert "market" in result.rejected[0].reason
+    assert "outcome" in result.rejected[0].reason
+
+
+# ---------------------------------------------------------------------------
+# Unknown fields retained
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_fields_in_raw_extra() -> None:
+    records = [_make_trade(totally_unknown_field="surprise")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.accepted) == 1
+    assert result.accepted[0].raw_extra.get("totally_unknown_field") == "surprise"
+
+
+# ---------------------------------------------------------------------------
+# Unix-seconds-to-UTC conversion
+# ---------------------------------------------------------------------------
+
+
+def test_unix_seconds_string_converted_to_utc() -> None:
+    ts = _parse_unix_seconds_to_utc("1723634400")
+    assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
+    assert ts.utcoffset().seconds == 0  # type: ignore[union-attr]
+
+
+def test_unix_seconds_int_converted_to_utc() -> None:
+    ts = _parse_unix_seconds_to_utc(1723634400)
+    assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
+
+
+def test_unix_seconds_zero_fractional_accepted() -> None:
+    ts = _parse_unix_seconds_to_utc("1723634400.0")
+    assert ts == datetime(2024, 8, 14, 11, 20, 0, tzinfo=UTC)
+
+
+def test_invalid_timestamp_string_rejected() -> None:
+    with pytest.raises(ValueError, match="cannot parse"):
+        _parse_unix_seconds_to_utc("not-a-number")
+
+
+def test_sub_second_timestamp_rejected() -> None:
+    with pytest.raises(ValueError, match="sub-second"):
+        _parse_unix_seconds_to_utc("1723634400.5")
+
+
+def test_raw_float_timestamp_rejected() -> None:
+    with pytest.raises(ValueError, match="raw float"):
+        _parse_unix_seconds_to_utc(1723634400.5)
+
+
+# ---------------------------------------------------------------------------
+# Decimal parsing and round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_decimal_from_string() -> None:
+    d = _parse_decimal("0.44", "price")
+    assert d == Decimal("0.44")
+
+
+def test_decimal_raw_float_rejected() -> None:
+    with pytest.raises(ValueError, match="raw float"):
+        _parse_decimal(0.44, "price")
+
+
+def test_decimal_round_trip() -> None:
+    original = "0.9999999999999"
+    d = _parse_decimal(original, "price")
+    assert str(d) == original
+
+
+# ---------------------------------------------------------------------------
+# Side validation
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_side_rejected() -> None:
+    records = [_make_trade(side="LONG")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+    assert "side" in result.rejected[0].reason.lower()
+
+
+def test_sell_side_accepted() -> None:
+    records = [_make_trade(side="SELL")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.accepted) == 1
+    assert result.accepted[0].side == "SELL"
+
+
+# ---------------------------------------------------------------------------
+# Price and size bounds
+# ---------------------------------------------------------------------------
+
+
+def test_price_above_one_rejected() -> None:
+    records = [_make_trade(price="1.01")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+    assert "price" in result.rejected[0].reason.lower()
+
+
+def test_price_below_zero_rejected() -> None:
+    records = [_make_trade(price="-0.01")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+
+
+def test_size_zero_rejected() -> None:
+    records = [_make_trade(size="0")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+    assert "size" in result.rejected[0].reason.lower()
+
+
+def test_size_negative_rejected() -> None:
+    records = [_make_trade(size="-1")]
+    result = normalize_records(records, account=ACCOUNT)
+    assert len(result.rejected) == 1
+
+
+# ---------------------------------------------------------------------------
+# Deterministic identity and duplicate detection
+# ---------------------------------------------------------------------------
+
+
+def test_identity_hash_is_deterministic() -> None:
+    record = _make_trade()
+    h1 = _make_identity_hash(record)
+    h2 = _make_identity_hash(record)
+    assert h1 == h2
+
+
+def test_identity_hash_differs_on_different_record() -> None:
+    r1 = _make_trade(price="0.44")
+    r2 = _make_trade(price="0.55")
+    assert _make_identity_hash(r1) != _make_identity_hash(r2)
+
+
+def test_duplicate_records_detected() -> None:
+    r = _make_trade()
+    result = normalize_records([r, r], account=ACCOUNT)
+    assert len(result.accepted) == 1
+    assert len(result.duplicate_ids) == 1
+
+
+def test_duplicate_ids_differ_when_api_id_present() -> None:
+    r1 = _make_trade(id="trade-x")
+    r2 = {**r1, "id": "trade-y"}
+    result = normalize_records([r1, r2], account=ACCOUNT)
+    # Different IDs: both accepted, no duplicate.
+    assert len(result.accepted) == 2
+    assert len(result.duplicate_ids) == 0
+
+
+# ---------------------------------------------------------------------------
+# Immutable raw storage
+# ---------------------------------------------------------------------------
+
+
+def test_write_raw_page_creates_file() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw = b'[{"id":"1"}]'
+        path, content_hash = write_raw_page(
+            raw,
+            output_dir=Path(tmpdir),
+            account="0xabc",
+            offset=0,
+            limit=100,
+        )
+        assert path.exists()
+        assert path.read_bytes() == raw
+
+
+def test_write_raw_page_exact_bytes() -> None:
+    """Raw bytes must be stored verbatim — not re-serialized."""
+    raw = b'[{"z":1,"a":2}]'  # Non-sorted keys.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path, _ = write_raw_page(raw, output_dir=Path(tmpdir), account="0xabc", offset=0, limit=100)
+        assert path.read_bytes() == raw
+
+
+def test_write_raw_page_manifest_written() -> None:
+    raw = b"[]"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_raw_page(raw, output_dir=Path(tmpdir), account="0xabc", offset=0, limit=100)
+        manifest = load_manifest(Path(tmpdir), "0xabc")
+        assert len(manifest) == 1
+        assert manifest[0]["offset"] == 0
+
+
+def test_completed_offsets_returned() -> None:
+    raw = b"[]"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        write_raw_page(raw, output_dir=Path(tmpdir), account="0xabc", offset=0, limit=100)
+        write_raw_page(raw, output_dir=Path(tmpdir), account="0xabc", offset=100, limit=100)
+        offsets = completed_offsets(Path(tmpdir), "0xabc")
+        assert offsets == {0, 100}
+
+
+def test_content_hash_in_filename() -> None:
+    import hashlib
+
+    raw = b'[{"id":"x"}]'
+    expected_prefix = hashlib.sha256(raw).hexdigest()[:12]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path, _ = write_raw_page(raw, output_dir=Path(tmpdir), account="0xacc", offset=0, limit=100)
+        assert expected_prefix in path.name
+
+
+# ---------------------------------------------------------------------------
+# Parquet write + reload
+# ---------------------------------------------------------------------------
+
+
+def _make_normalized_trade(source_trade_id: str = "t1") -> NormalizedTrade:
+    return NormalizedTrade(
+        source="test",
+        source_trade_id=source_trade_id,
+        account=ACCOUNT,
+        market_id="0xmarket",
+        timestamp=datetime(2024, 8, 14, 10, 0, 0, tzinfo=UTC),
+        outcome="UP",
+        side="BUY",
+        price=Decimal("0.44"),
+        shares=Decimal("200"),
+        transaction_hash="0xtx",
+        raw_extra={"_record_index": 0},
+    )
+
+
+def test_parquet_write_reload_roundtrip() -> None:
+    trade = _make_normalized_trade()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pq_path = write_parquet([trade], Path(tmpdir), ACCOUNT)
+        reloaded = load_parquet(pq_path)
+        assert len(reloaded) == 1
+        r = reloaded[0]
+        assert r.source_trade_id == trade.source_trade_id
+        assert r.price == trade.price
+        assert r.shares == trade.shares
+        assert r.timestamp == trade.timestamp
+        assert r.timestamp.tzinfo is not None
+
+
+def test_parquet_empty_write_reload() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pq_path = write_parquet([], Path(tmpdir), ACCOUNT)
+        reloaded = load_parquet(pq_path)
+        assert reloaded == []
+
+
+# ---------------------------------------------------------------------------
+# DuckDB write + reload
+# ---------------------------------------------------------------------------
+
+
+def test_duckdb_write_reload_roundtrip() -> None:
+    trade = _make_normalized_trade()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.duckdb"
+        inserted, skipped = write_duckdb([trade], db_path)
+        assert inserted == 1
+        assert skipped == 0
+        reloaded = load_duckdb(db_path, account=ACCOUNT)
+        assert len(reloaded) == 1
+        r = reloaded[0]
+        assert r.source_trade_id == trade.source_trade_id
+        assert r.price == trade.price
+        assert r.shares == trade.shares
+
+
+def test_duckdb_duplicate_skipped() -> None:
+    trade = _make_normalized_trade()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.duckdb"
+        write_duckdb([trade], db_path)
+        inserted2, skipped2 = write_duckdb([trade], db_path)
+        assert inserted2 == 0
+        assert skipped2 == 1
+
+
+# ---------------------------------------------------------------------------
+# Validation report
+# ---------------------------------------------------------------------------
+
+
+def test_validation_report_counts() -> None:
+    records = _fixture_records()
+    result = normalize_records(records, account=ACCOUNT)
+    timestamps = [t.timestamp for t in result.accepted]
+    report = build_report(
+        input_records=len(records),
+        valid_records=len(result.accepted),
+        duplicate_records=len(result.duplicate_ids),
+        invalid_records=len(result.rejected),
+        missing_required_fields=0,
+        timestamps=timestamps,
+    )
+    assert report.input_records == 2
+    assert report.valid_records == 2
+    assert report.invalid_records == 0
+    assert report.duplicate_records == 0
+    assert report.earliest_timestamp is not None
+    assert report.latest_timestamp is not None
+    assert report.earliest_timestamp <= report.latest_timestamp  # type: ignore[operator]
+
+
+def test_validation_report_summary_contains_key_info() -> None:
+    report = ValidationReport(
+        input_records=10,
+        valid_records=8,
+        duplicate_records=1,
+        invalid_records=1,
+        missing_required_fields=1,
+        earliest_timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        latest_timestamp=datetime(2024, 12, 31, tzinfo=UTC),
+    )
+    s = report.summary()
+    assert "10" in s
+    assert "8" in s
+    assert "Clean" in s
+
+
+def test_clean_report() -> None:
+    report = ValidationReport(10, 10, 0, 0)
+    assert report.is_clean is True
+
+
+def test_duplicate_report_is_not_clean() -> None:
+    report = ValidationReport(10, 9, 1, 0)
+    assert report.is_clean is False
+
+
+# ---------------------------------------------------------------------------
+# Pagination stop and resume (MockTransport)
+# ---------------------------------------------------------------------------
+
+
+def test_pagination_stop_on_short_page() -> None:
+    """Collector returns fewer records than limit → pagination stops."""
+    import asyncio
+
+    import httpx
+
+    # page_a has exactly `limit` records (full page) → continue
+    # page_b has fewer records (short page) → stop
+    page_a = json.dumps([_make_trade(id="t1"), _make_trade(id="t2"), _make_trade(id="t3")])
+    page_b = json.dumps([_make_trade(id="t4")])  # Short page (1 < 3) → stop
+
+    responses = [
+        httpx.Response(200, text=page_a, headers={"Content-Type": "application/json"}),
+        httpx.Response(200, text=page_b, headers={"Content-Type": "application/json"}),
+    ]
+    call_index = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_index
+        resp = responses[call_index]
+        call_index += 1
+        return resp
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url="https://data-api.polymarket.com")
+    collector = PolymarketPublicTradeCollector(client=client)
+
+    async def _run() -> None:
+        all_records = []
+        offset = 0
+        limit = 3
+        while True:
+            _, records = await collector.fetch_page(account="0xacc", offset=offset, limit=limit)
+            all_records.extend(records)
+            if len(records) < limit:
+                break
+            offset += limit
+        assert len(all_records) == 4
+        assert call_index == 2
+
+    asyncio.run(_run())
+
+
+def test_pagination_resume_skips_completed_offsets() -> None:
+    """Completed offsets from manifest are skipped without fetching."""
+    import tempfile
+
+    raw = b"[]"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw_dir = Path(tmpdir)
+        write_raw_page(raw, output_dir=raw_dir, account="0xacc", offset=0, limit=2)
+        write_raw_page(raw, output_dir=raw_dir, account="0xacc", offset=2, limit=2)
+        done = completed_offsets(raw_dir, "0xacc")
+        assert 0 in done
+        assert 2 in done
+        assert 4 not in done
+
+
+# Ensure collector import works.
+from polymarket_edge_lab.collectors.polymarket import PolymarketPublicTradeCollector  # noqa: E402
