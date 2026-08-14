@@ -70,7 +70,9 @@ def test_classification_rules() -> None:
     )
     undersized = [row(str(i), "0.9", qty="499") for i in range(5)]
     assert classify(undersized) == "insufficient_data"
-    incomplete = [row(str(i), "0.98") for i in range(4)] + [row("x", "0.98", complete=False)]
+    incomplete = [row(str(i), "0.98") for i in range(4)] + [
+        row("x", "0.98", complete=False)
+    ]
     assert classify(incomplete) == "insufficient_data"
 
 
