@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 
@@ -19,6 +20,23 @@ class WindowMetric:
     paired_shares: Decimal
     weighted_pair_cost: Decimal | None
     below_one_ratio: Decimal | None
+
+
+def generate_daily_windows(
+    first_day: date, *, day_count: int, start_hour_utc: int, duration_hours: int
+) -> list[tuple[str, int, int]]:
+    if day_count < 1 or duration_hours < 1:
+        raise ValueError("day_count and duration_hours must be positive")
+    if not 0 <= start_hour_utc <= 23 or start_hour_utc + duration_hours > 24:
+        raise ValueError("UTC window must fit inside one calendar day")
+    windows: list[tuple[str, int, int]] = []
+    for offset in range(day_count):
+        day = first_day + timedelta(days=offset)
+        start = datetime.combine(day, time(start_hour_utc), tzinfo=timezone.utc)
+        end = start + timedelta(hours=duration_hours)
+        window_id = f"{day.isoformat()}T{start_hour_utc:02d}-{end.hour:02d}Z"
+        windows.append((window_id, int(start.timestamp()), int(end.timestamp())))
+    return windows
 
 
 def weighted_cost(rows: list[WindowMetric]) -> Decimal | None:
