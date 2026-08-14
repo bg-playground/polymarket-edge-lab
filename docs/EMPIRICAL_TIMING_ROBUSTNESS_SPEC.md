@@ -6,6 +6,8 @@ This phase tests whether the timing patterns observed in the merged six-hour BTC
 
 The reference bounded cohort showed full-cohort pair cost above $1 under FIFO/LIFO/weighted-average accounting, while certain descriptive timing slices were below $1, especially 61-120 second complementary-fill lag and the 100-199 second portion of the 5-minute market. These effects must now be tested out-of-sample.
 
+The completed frozen-panel results are recorded in `docs/EMPIRICAL_TIMING_ROBUSTNESS_RESULTS.md`.
+
 ## Primary questions
 
 1. Does the 61-120 second FIFO latency bucket remain below $1 across multiple independent windows?
