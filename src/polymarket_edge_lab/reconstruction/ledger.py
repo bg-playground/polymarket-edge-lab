@@ -38,7 +38,19 @@ def build_canonical_ledger(
     *,
     complete_market_ids: set[str] | None = None,
 ) -> list[LedgerEntry]:
-    complete_market_ids = complete_market_ids if complete_market_ids is not None else set()
+    """Build a deterministic forensic ledger.
+
+    Completeness semantics are intentionally explicit:
+
+    * ``complete_market_ids is None`` means completeness is not being constrained
+      by the caller, so eligible binary markets may be treated as complete.
+    * ``complete_market_ids == set()`` means the caller explicitly knows that no
+      markets in the supplied slice are complete; those markets must remain
+      excluded from claim-grade inventory/pair accounting.
+    * a non-empty set marks only those market IDs as complete.
+    """
+    assume_complete = complete_market_ids is None
+    explicit_complete_market_ids = complete_market_ids or set()
     sorted_trades = sorted(trades, key=lambda t: (t.timestamp, t.source_trade_id))
 
     outcomes_by_market: dict[str, set[str]] = defaultdict(set)
@@ -49,7 +61,7 @@ def build_canonical_ledger(
     for market_id, outcomes in outcomes_by_market.items():
         eligibility[market_id] = classify_binary_market(
             outcomes,
-            history_complete=market_id in complete_market_ids if complete_market_ids else True,
+            history_complete=assume_complete or market_id in explicit_complete_market_ids,
         )
 
     market_seq: dict[str, int] = defaultdict(int)
