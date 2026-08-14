@@ -1,3 +1,4 @@
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from polymarket_edge_lab.analysis.timing_robustness import (
@@ -5,6 +6,7 @@ from polymarket_edge_lab.analysis.timing_robustness import (
     classify,
     cumulative,
     equal_window_mean,
+    generate_daily_windows,
     leave_one_out,
     weighted_cost,
 )
@@ -29,6 +31,19 @@ def row(
     )
 
 
+def test_daily_windows_have_exact_utc_boundaries_and_do_not_overlap() -> None:
+    windows = generate_daily_windows(
+        date(2026, 8, 7), day_count=7, start_hour_utc=12, duration_hours=6
+    )
+    assert len(windows) == 7
+    first = windows[0]
+    assert first[0] == "2026-08-07T12-18Z"
+    assert first[1] == int(datetime(2026, 8, 7, 12, tzinfo=timezone.utc).timestamp())
+    assert first[2] == int(datetime(2026, 8, 7, 18, tzinfo=timezone.utc).timestamp())
+    for previous, current in zip(windows, windows[1:], strict=True):
+        assert previous[2] < current[1]
+
+
 def test_weighted_and_equal_window_means_differ() -> None:
     rows = [row("a", "0.90", qty="500"), row("b", "1.10", qty="1500")]
     assert weighted_cost(rows) == Decimal("1.05")
@@ -50,7 +65,9 @@ def test_classification_rules() -> None:
     not_replicated = [row(str(i), "1.01") for i in range(4)]
     assert classify(not_replicated) == "not_replicated"
 
-    assert classify([row("a", "0.9"), row("b", "0.9"), row("c", "0.9")]) == ("insufficient_data")
+    assert classify([row("a", "0.9"), row("b", "0.9"), row("c", "0.9")]) == (
+        "insufficient_data"
+    )
     undersized = [row(str(i), "0.9", qty="499") for i in range(5)]
     assert classify(undersized) == "insufficient_data"
     incomplete = [row(str(i), "0.98") for i in range(4)] + [row("x", "0.98", complete=False)]
