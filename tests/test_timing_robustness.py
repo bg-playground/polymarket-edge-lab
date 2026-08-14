@@ -40,7 +40,7 @@ def test_daily_windows_have_exact_utc_boundaries_and_do_not_overlap() -> None:
     assert first[0] == "2026-08-07T12-18Z"
     assert first[1] == int(datetime(2026, 8, 7, 12, tzinfo=timezone.utc).timestamp())
     assert first[2] == int(datetime(2026, 8, 7, 18, tzinfo=timezone.utc).timestamp())
-    for previous, current in zip(windows, windows[1:], strict=True):
+    for previous, current in zip(windows[:-1], windows[1:], strict=True):
         assert previous[2] < current[1]
 
 
