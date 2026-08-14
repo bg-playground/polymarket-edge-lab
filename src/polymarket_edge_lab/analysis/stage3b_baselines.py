@@ -77,9 +77,8 @@ def regression_metrics(rows: list[PanelRow], predictions: list[Decimal]) -> dict
         sum(w * abs(error) for w, error in zip(weights, errors, strict=True)) / total_weight
     )
     unweighted_mae = sum(abs(error) for error in errors) / len(errors)
-    weighted_bias = sum(
-        w * error for w, error in zip(weights, errors, strict=True)
-    ) / total_weight
+    weighted_pairs = zip(weights, errors, strict=True)
+    weighted_bias = sum(w * error for w, error in weighted_pairs) / total_weight
     return {
         "weighted_mae": weighted_mae,
         "unweighted_mae": unweighted_mae,
