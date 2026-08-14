@@ -110,4 +110,5 @@ def collect_coinbase_btc_usd(
 
 def write_provenance(path: Path, provenance: BtcReferenceProvenance) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(provenance), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    content = json.dumps(asdict(provenance), indent=2, sort_keys=True) + "\n"
+    path.write_text(content, encoding="utf-8")
