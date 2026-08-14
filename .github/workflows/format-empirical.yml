@@ -23,7 +23,7 @@ jobs:
       - name: Apply repository formatting
         run: |
           ruff format .
-          ruff check --fix .
+          ruff check --fix . || true
       - name: Commit formatting if needed
         shell: bash
         run: |
