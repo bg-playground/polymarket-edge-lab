@@ -98,9 +98,17 @@ def build_btc_features(
 
     latest = causal[-1]
     current = latest.close
+    source_resolution = max(candle.interval_seconds for candle in causal)
 
     def trailing_return(seconds: int) -> Decimal | None:
+        if seconds < source_resolution:
+            return None
         return _safe_return(current, _close_at_or_before(causal, event_epoch - seconds))
+
+    def realized_vol(seconds: int) -> Decimal | None:
+        if seconds < source_resolution:
+            return None
+        return _sample_std(_returns(causal, event_epoch - seconds, event_epoch))
 
     ret60 = trailing_return(60)
     start_price = (
@@ -127,9 +135,9 @@ def build_btc_features(
         return_30s=trailing_return(30),
         return_60s=ret60,
         return_120s=trailing_return(120),
-        realized_vol_30s=_sample_std(_returns(causal, event_epoch - 30, event_epoch)),
-        realized_vol_60s=_sample_std(_returns(causal, event_epoch - 60, event_epoch)),
-        realized_vol_120s=_sample_std(_returns(causal, event_epoch - 120, event_epoch)),
+        realized_vol_30s=realized_vol(30),
+        realized_vol_60s=realized_vol(60),
+        realized_vol_120s=realized_vol(120),
         absolute_return_60s=abs(ret60) if ret60 is not None else None,
         return_since_market_start=since_start,
         range_since_market_start=range_since_start,
