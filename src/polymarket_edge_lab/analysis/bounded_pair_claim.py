@@ -70,9 +70,7 @@ def _sort_key(row: LedgerEntry, tie_break: TieBreak) -> tuple[object, ...]:
     return (row.timestamp, row.fill_sequence_number)
 
 
-def _pair_one_market(
-    rows: list[LedgerEntry], *, tie_break: TieBreak
-) -> list[PairFormationEvent]:
+def _pair_one_market(rows: list[LedgerEntry], *, tie_break: TieBreak) -> list[PairFormationEvent]:
     unmatched: dict[str, deque[tuple[Decimal, Decimal, datetime]]] = {
         "UP": deque(),
         "DOWN": deque(),
@@ -143,12 +141,8 @@ def summarize_chronological_pair_formation(
     paired_shares = sum((event.paired_shares for event in events), start=ZERO)
     weighted_pair_cost = None
     weighted_edge = None
-    below_one = sum(
-        (event.paired_shares for event in events if event.pair_cost < ONE), start=ZERO
-    )
-    zero_lag = sum(
-        (event.paired_shares for event in events if event.lag_seconds == 0), start=ZERO
-    )
+    below_one = sum((event.paired_shares for event in events if event.pair_cost < ONE), start=ZERO)
+    zero_lag = sum((event.paired_shares for event in events if event.lag_seconds == 0), start=ZERO)
     if paired_shares > ZERO:
         weighted_pair_cost = (
             sum((event.pair_cost * event.paired_shares for event in events), start=ZERO)
