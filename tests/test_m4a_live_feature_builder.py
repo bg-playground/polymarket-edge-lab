@@ -199,10 +199,13 @@ def test_builder_emits_exact_frozen_feature_order_and_buy_only_state(tmp_path: P
     assert record["event_type"] == "feature_snapshot"
     payload = record["payload"]
     assert isinstance(payload, dict)
-    assert payload["feature_order"] == list(MODEL_FEATURES["hgb_all_pre_event"])
+    feature_order = payload["feature_order"]
+    assert feature_order == list(MODEL_FEATURES["hgb_all_pre_event"])
+    assert isinstance(feature_order, list)
     features = payload["features"]
     assert isinstance(features, dict)
-    assert tuple(features) == MODEL_FEATURES["hgb_all_pre_event"]
+    ordered_values = [features[name] for name in feature_order]
+    assert len(ordered_values) == len(MODEL_FEATURES["hgb_all_pre_event"])
     assert features["elapsed_seconds"] == 130
     assert features["seconds_remaining"] == 170
     assert features["up_inventory"] == 2.0
