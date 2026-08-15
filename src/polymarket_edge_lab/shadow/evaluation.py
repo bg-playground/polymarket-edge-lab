@@ -107,7 +107,7 @@ def start_frozen_evaluation(
     store.append(
         EventEnvelope(
             schema_version="m4a-event-v1",
-            event_type="evaluation_run_start",  # type: ignore[arg-type]
+            event_type="evaluation_run_start",
             event_id=event_id,
             run_id=config.run_id,
             sequence=sequence,
