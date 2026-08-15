@@ -54,9 +54,7 @@ def _append_fill(store: AppendOnlyEventStore, fill: NormalizedFill) -> str:
 def test_processor_emits_application_and_pair_provenance(tmp_path: Path) -> None:
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     _append_fill(store, _fill("up-1", "BUY", "UP", "3", "0.44", 2))
-    completing_event_id = _append_fill(
-        store, _fill("down-1", "BUY", "DOWN", "2", "0.51", 7)
-    )
+    completing_event_id = _append_fill(store, _fill("down-1", "BUY", "DOWN", "2", "0.51", 7))
 
     processor = LiveStateProcessor(run_id="run", store=store)
     result = processor.process_pending()
