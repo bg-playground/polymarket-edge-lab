@@ -23,6 +23,8 @@ EventType = Literal[
     "state_quarantine",
     "state_reconciliation",
     "replay_audit",
+    "evaluation_run_start",
+    "evaluation_report",
 ]
 
 OutcomeSide = Literal["UP", "DOWN"]
