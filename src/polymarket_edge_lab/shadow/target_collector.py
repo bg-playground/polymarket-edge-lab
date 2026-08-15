@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import httpx
 
 from polymarket_edge_lab.normalization.trades import normalize_records
-from polymarket_edge_lab.shadow.events import EventEnvelope, NormalizedFill
+from polymarket_edge_lab.shadow.events import EventEnvelope, NormalizedFill, OutcomeSide
+from polymarket_edge_lab.shadow.market_metadata import LiveMarketMetadataResolver
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 
 DATA_API_BASE = "https://data-api.polymarket.com"
@@ -32,6 +34,9 @@ class PollResult:
     normalized_fill_count: int
     duplicate_fill_count: int
     rejected_record_count: int
+    ineligible_fill_count: int
+    unmapped_asset_count: int
+    outcome_disagreement_count: int
 
 
 def _utc_now() -> datetime:
@@ -43,7 +48,7 @@ def _event_id(run_id: str, sequence: int) -> str:
 
 
 class LiveTargetAccountCollector:
-    """Read-only Data API collector with durable append-before-normalize storage."""
+    """Read-only Data API collector with metadata-gated normalized fills."""
 
     def __init__(
         self,
@@ -51,6 +56,7 @@ class LiveTargetAccountCollector:
         account: str,
         run_id: str,
         store: AppendOnlyEventStore,
+        metadata_resolver: LiveMarketMetadataResolver,
         client: httpx.AsyncClient | None = None,
         base_url: str = DATA_API_BASE,
         page_limit: int = DEFAULT_PAGE_LIMIT,
@@ -60,6 +66,7 @@ class LiveTargetAccountCollector:
         self.account = account.lower()
         self.run_id = run_id
         self.store = store
+        self._metadata_resolver = metadata_resolver
         self._client = client
         self._base_url = base_url.rstrip("/")
         self._page_limit = page_limit
@@ -68,12 +75,12 @@ class LiveTargetAccountCollector:
             store.path.parent / "raw" / "polymarket_data_api"
         )
         self._raw_archive_dir.mkdir(parents=True, exist_ok=True)
-        self._seen_source_trade_ids = self._load_seen_source_trade_ids()
+        self._processed_source_trade_ids = self._load_processed_source_trade_ids()
 
-    def _load_seen_source_trade_ids(self) -> set[str]:
+    def _load_processed_source_trade_ids(self) -> set[str]:
         seen: set[str] = set()
         for record in self.store.iter_records():
-            if record.get("event_type") != "normalized_fill":
+            if record.get("event_type") not in {"fill_admission", "normalized_fill"}:
                 continue
             payload = record.get("payload")
             if isinstance(payload, dict) and payload.get("source_trade_id") is not None:
@@ -208,18 +215,77 @@ class LiveTargetAccountCollector:
         normalize_complete = self._clock()
         new_fill_count = 0
         duplicate_fill_count = 0
+        ineligible_fill_count = 0
+        unmapped_asset_count = 0
+        outcome_disagreement_count = 0
+
         for trade in normalized.accepted:
-            if trade.source_trade_id in self._seen_source_trade_ids:
+            if trade.source_trade_id in self._processed_source_trade_ids:
                 duplicate_fill_count += 1
                 continue
-            outcome = trade.outcome.strip().upper()
-            if outcome not in {"UP", "DOWN"}:
+
+            market_result = await self._metadata_resolver.resolve(trade.market_id)
+            if not market_result.eligible or market_result.metadata is None:
+                self._append_fill_admission(
+                    trade_id=trade.source_trade_id,
+                    market_id=trade.market_id,
+                    asset_id=trade.asset_id,
+                    admitted=False,
+                    reason_code=f"market_{market_result.reason_code}",
+                    outcome_side=None,
+                    observed_at=normalize_complete,
+                    raw_event_id=raw_event_id,
+                )
+                self._processed_source_trade_ids.add(trade.source_trade_id)
+                ineligible_fill_count += 1
                 continue
+
+            metadata = market_result.metadata
+            mapped_side = metadata.outcome_side_for_token(trade.asset_id)
+            if mapped_side is None:
+                self._append_fill_admission(
+                    trade_id=trade.source_trade_id,
+                    market_id=trade.market_id,
+                    asset_id=trade.asset_id,
+                    admitted=False,
+                    reason_code="asset_not_in_durable_token_mapping",
+                    outcome_side=None,
+                    observed_at=normalize_complete,
+                    raw_event_id=raw_event_id,
+                )
+                self._processed_source_trade_ids.add(trade.source_trade_id)
+                unmapped_asset_count += 1
+                continue
+
+            textual_outcome = trade.outcome.strip().upper()
+            if textual_outcome != mapped_side:
+                outcome_disagreement_count += 1
+                self._append_source_health(
+                    status="outcome_mapping_disagreement",
+                    detail=(
+                        f"trade {trade.source_trade_id} text={textual_outcome!r} "
+                        f"token_mapping={mapped_side!r}"
+                    ),
+                    observed_at=normalize_complete,
+                    raw_event_id=raw_event_id,
+                )
+
+            outcome_side = cast(OutcomeSide, mapped_side)
+            admission_event_id = self._append_fill_admission(
+                trade_id=trade.source_trade_id,
+                market_id=trade.market_id,
+                asset_id=trade.asset_id,
+                admitted=True,
+                reason_code="eligible_market_asset_mapping",
+                outcome_side=outcome_side,
+                observed_at=normalize_complete,
+                raw_event_id=raw_event_id,
+            )
             fill = NormalizedFill(
                 source_trade_id=trade.source_trade_id,
                 market_id=trade.market_id,
                 asset_id=trade.asset_id,
-                outcome_side=outcome,  # type: ignore[arg-type]
+                outcome_side=outcome_side,
                 side=trade.side,
                 source_timestamp=trade.timestamp,
                 price=trade.price,
@@ -232,6 +298,11 @@ class LiveTargetAccountCollector:
             payload_record.update(
                 {
                     "raw_observation_event_id": raw_event_id,
+                    "fill_admission_event_id": admission_event_id,
+                    "market_metadata_sha256": metadata.raw_observation_sha256,
+                    "market_slug": metadata.slug,
+                    "market_start_epoch": metadata.market_start_epoch,
+                    "market_end_epoch": metadata.market_end_epoch,
                     "response_sha256": response_sha256,
                     "parse_complete": parse_complete.astimezone(UTC).isoformat(),
                     "normalize_complete": normalize_complete.astimezone(UTC).isoformat(),
@@ -248,12 +319,15 @@ class LiveTargetAccountCollector:
                     payload=payload_record,
                 )
             )
-            self._seen_source_trade_ids.add(trade.source_trade_id)
+            self._processed_source_trade_ids.add(trade.source_trade_id)
             new_fill_count += 1
 
         self._append_source_health(
             status="poll_ok",
-            detail=f"records={len(raw_records)} new_fills={new_fill_count}",
+            detail=(
+                f"records={len(raw_records)} new_fills={new_fill_count} "
+                f"ineligible={ineligible_fill_count} unmapped={unmapped_asset_count}"
+            ),
             observed_at=normalize_complete,
             raw_event_id=raw_event_id,
         )
@@ -265,7 +339,45 @@ class LiveTargetAccountCollector:
             normalized_fill_count=new_fill_count,
             duplicate_fill_count=duplicate_fill_count,
             rejected_record_count=len(normalized.rejected),
+            ineligible_fill_count=ineligible_fill_count,
+            unmapped_asset_count=unmapped_asset_count,
+            outcome_disagreement_count=outcome_disagreement_count,
         )
+
+    def _append_fill_admission(
+        self,
+        *,
+        trade_id: str,
+        market_id: str,
+        asset_id: str,
+        admitted: bool,
+        reason_code: str,
+        outcome_side: OutcomeSide | None,
+        observed_at: datetime,
+        raw_event_id: str,
+    ) -> str:
+        sequence = self.store.next_sequence()
+        event_id = _event_id(self.run_id, sequence)
+        self.store.append(
+            EventEnvelope(
+                schema_version="m4a-event-v1",
+                event_type="fill_admission",
+                event_id=event_id,
+                run_id=self.run_id,
+                sequence=sequence,
+                created_at=observed_at,
+                payload={
+                    "source_trade_id": trade_id,
+                    "market_id": market_id,
+                    "asset_id": asset_id,
+                    "admitted": admitted,
+                    "reason_code": reason_code,
+                    "outcome_side": outcome_side,
+                    "raw_observation_event_id": raw_event_id,
+                },
+            )
+        )
+        return event_id
 
     def _append_source_health(
         self,
