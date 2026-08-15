@@ -120,9 +120,13 @@ jobs:
 
       - name: Write checksum inventory
         run: |
-          find frozen-models -type f -print0 | sort -z | xargs -0 sha256sum > frozen-models/SHA256SUMS
+          find frozen-models -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > frozen-models/SHA256SUMS
           cat frozen-models/source_provenance.json
           cat frozen-models/manifest.json
+          cat frozen-models/SHA256SUMS
 
       - name: Upload frozen model evidence
         uses: actions/upload-artifact@v4
