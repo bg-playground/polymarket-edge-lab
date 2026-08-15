@@ -136,14 +136,11 @@ async def test_revised_closed_candle_appends_superseding_event(tmp_path: Path) -
         second = await collector.poll_once()
 
     assert second.revised_candle_count == 1
-    candles = [
-        record for record in store.iter_records() if record["event_type"] == "btc_candle"
-    ]
+    candles = [record for record in store.iter_records() if record["event_type"] == "btc_candle"]
     target = [
         record
         for record in candles
-        if isinstance(record["payload"], dict)
-        and record["payload"]["open_epoch"] == 1786795260
+        if isinstance(record["payload"], dict) and record["payload"]["open_epoch"] == 1786795260
     ]
     assert len(target) == 2
     assert target[1]["supersedes_event_id"] == target[0]["event_id"]
