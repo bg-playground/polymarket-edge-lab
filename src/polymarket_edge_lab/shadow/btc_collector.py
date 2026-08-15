@@ -264,11 +264,7 @@ class LiveBtc60Collector:
 
         receive_epoch = int(response_receive.timestamp())
         parsed = [_parse_candle_row(row) for row in payload]
-        causal = [
-            (candle, volume)
-            for candle, volume in parsed
-            if candle.close_epoch <= receive_epoch
-        ]
+        causal = [(candle, volume) for candle, volume in parsed if candle.close_epoch <= receive_epoch]
         new_count = 0
         revised_count = 0
         duplicate_count = 0
@@ -350,8 +346,7 @@ class LiveBtc60Collector:
                     "candle_fingerprint": fingerprint,
                     "raw_observation_event_id": raw_event_id,
                     "response_sha256": response_sha256,
-                    "causal_at_observation": candle.close_epoch
-                    <= int(observed_at.timestamp()),
+                    "causal_at_observation": candle.close_epoch <= int(observed_at.timestamp()),
                 },
             )
         )
