@@ -91,9 +91,11 @@ class LiveTargetAccountCollector:
                 handle.write(raw_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
-        except FileExistsError:
+        except FileExistsError as exc:
             if path.read_bytes() != raw_bytes:
-                raise ValueError(f"raw archive hash collision or corruption at {path}")
+                raise ValueError(
+                    f"raw archive hash collision or corruption at {path}"
+                ) from exc
         return path
 
     async def poll_once(self) -> PollResult:
