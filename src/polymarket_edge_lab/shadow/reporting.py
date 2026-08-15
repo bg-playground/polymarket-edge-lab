@@ -205,7 +205,9 @@ def build_prospective_report(
     freshness = {key: _weighted_mean(values) for key, values in diagnostics.items()}
 
     reportable_days = sorted(
-        day.isoformat() for day, count in day_counts.items() if count >= REPORTABLE_DAY_MIN_BOUND_ROWS
+        day.isoformat()
+        for day, count in day_counts.items()
+        if count >= REPORTABLE_DAY_MIN_BOUND_ROWS
     )
     elapsed = _elapsed_days(started_at, generated_at)
     bound_count = len(bound_rows)
