@@ -1,0 +1,112 @@
+name: Milestone 3D held-out baselines
+
+on:
+  push:
+    branches:
+      - milestone-3d-heldout-baselines
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heldout-baselines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project
+        run: pip install -e ".[dev]"
+      - name: Run deterministic tests
+        run: pytest -q
+      - name: Define frozen seven-day panel
+        run: |
+          mkdir -p evidence/stage3d data/stage3d reports/stage3d
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          windows = []
+          for day in range(7, 14):
+              start = int(datetime(2026, 8, day, 12, 0, tzinfo=timezone.utc).timestamp())
+              windows.append({
+                  "window_id": f"2026-08-{day:02d}T12-18Z",
+                  "start_epoch": start,
+                  "end_epoch": start + 21600,
+              })
+          with open("evidence/stage3d/window_manifest.json", "w", encoding="utf-8") as handle:
+              json.dump({"windows": windows}, handle, indent=2)
+          PY
+      - name: Collect independent BTC reference data
+        run: |
+          START=$(python -c 'import json; print(json.load(open("evidence/stage3d/window_manifest.json"))["windows"][0]["start_epoch"] - 300)')
+          END=$(python -c 'import json; print(json.load(open("evidence/stage3d/window_manifest.json"))["windows"][-1]["end_epoch"])')
+          python scripts/collect_btc_reference.py \
+            --start "$START" --end "$END" \
+            --raw evidence/stage3d/coinbase-btc-usd-60s-raw.json \
+            --provenance evidence/stage3d/coinbase-btc-usd-60s-provenance.json
+      - name: Collect frozen Polymarket windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACCOUNT=0xbf337426aa856996b8bb79b238345dd1a0276bf7
+          python - <<'PY' > /tmp/windows.tsv
+          import json
+          data = json.load(open("evidence/stage3d/window_manifest.json", encoding="utf-8"))
+          for w in data["windows"]:
+              print(w["window_id"], w["start_epoch"], w["end_epoch"], sep="\t")
+          PY
+          while IFS=$'\t' read -r WINDOW START END; do
+            echo "=== $WINDOW [$START, $END) ==="
+            mkdir -p "data/stage3d/$WINDOW/raw" "data/stage3d/$WINDOW/normalized"
+            python scripts/collect_historical_trades.py \
+              --account "$ACCOUNT" \
+              --windowed \
+              --global-start "$START" \
+              --global-end "$END" \
+              --window-seconds 3600 \
+              --min-window-seconds 300 \
+              --page-size 500 \
+              --raw-dir "data/stage3d/$WINDOW/raw" \
+              --normalized-dir "data/stage3d/$WINDOW/normalized" \
+              --duckdb-path "data/stage3d/$WINDOW/window.duckdb" \
+              2>&1 | tee "evidence/stage3d/$WINDOW-collection.log"
+          done < /tmp/windows.tsv
+      - name: Materialize validated causal panel
+        run: |
+          python scripts/materialize_stage3c_panel.py \
+            --account 0xbf337426aa856996b8bb79b238345dd1a0276bf7 \
+            --manifest evidence/stage3d/window_manifest.json \
+            --data-root data/stage3d \
+            --btc-raw evidence/stage3d/coinbase-btc-usd-60s-raw.json \
+            --output-dir reports/stage3d \
+            | tee evidence/stage3d/materialization.log
+      - name: Evaluate frozen held-out baselines
+        run: |
+          python scripts/evaluate_stage3d_baselines.py \
+            --panel reports/stage3d/stage3c_feature_panel.parquet \
+            --output-dir reports/stage3d \
+            | tee evidence/stage3d/heldout-baselines.log
+      - name: Assert seven-window evaluation
+        run: |
+          python - <<'PY'
+          import json
+          result = json.load(open("reports/stage3d/stage3d_heldout_results.json"))
+          assert result["window_count"] == 7
+          assert result["row_count"] > 0
+          for model, folds in result["folds"].items():
+              assert len(folds) == 7, (model, len(folds))
+          print("validated seven held-out folds for every Stage 3D model")
+          PY
+      - name: Upload Stage 3D evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-3d-heldout-baselines
+          path: |
+            evidence/stage3d/
+            reports/stage3d/
+            data/stage3d/*/normalized/
+          if-no-files-found: error
+          retention-days: 30
