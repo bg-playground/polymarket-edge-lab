@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from polymarket_edge_lab.shadow.events import NormalizedFill, OutcomeSide
@@ -14,14 +15,23 @@ class _Lot:
     shares: Decimal
     price: Decimal
     source_trade_id: str
+    source_timestamp: datetime
+    receive_timestamp: datetime
 
 
 @dataclass(frozen=True)
 class PairFormation:
     market_id: str
     completing_source_trade_id: str
+    up_source_trade_id: str
+    down_source_trade_id: str
     paired_shares: Decimal
+    up_price: Decimal
+    down_price: Decimal
     pair_cost: Decimal
+    lag_seconds: int
+    formed_at_source_timestamp: datetime
+    formed_at_receive_timestamp: datetime
 
 
 @dataclass(frozen=True)
@@ -90,7 +100,7 @@ class MarketOnlineState:
         else:
             self._apply_inventory("DOWN", fill)
 
-        return self._form_pairs(fill.source_trade_id)
+        return self._form_pairs(fill)
 
     def _validate_sell(self, fill: NormalizedFill) -> None:
         if fill.outcome_side == "UP":
@@ -133,7 +143,15 @@ class MarketOnlineState:
 
         if fill.side == "BUY":
             inventory += fill.shares
-            lots.append(_Lot(fill.shares, fill.price, fill.source_trade_id))
+            lots.append(
+                _Lot(
+                    fill.shares,
+                    fill.price,
+                    fill.source_trade_id,
+                    fill.source_timestamp,
+                    fill.receive_timestamp,
+                )
+            )
         else:
             inventory -= fill.shares
             self._consume_lots(lots, fill.shares)
@@ -156,18 +174,26 @@ class MarketOnlineState:
             if lot.shares == ZERO:
                 lots.popleft()
 
-    def _form_pairs(self, completing_source_trade_id: str) -> list[PairFormation]:
+    def _form_pairs(self, completing_fill: NormalizedFill) -> list[PairFormation]:
         formations: list[PairFormation] = []
         while self._up_unpaired and self._down_unpaired:
             up = self._up_unpaired[0]
             down = self._down_unpaired[0]
             paired = min(up.shares, down.shares)
+            lag_seconds = abs(int((up.source_timestamp - down.source_timestamp).total_seconds()))
             formations.append(
                 PairFormation(
                     market_id=self.market_id,
-                    completing_source_trade_id=completing_source_trade_id,
+                    completing_source_trade_id=completing_fill.source_trade_id,
+                    up_source_trade_id=up.source_trade_id,
+                    down_source_trade_id=down.source_trade_id,
                     paired_shares=paired,
+                    up_price=up.price,
+                    down_price=down.price,
                     pair_cost=up.price + down.price,
+                    lag_seconds=lag_seconds,
+                    formed_at_source_timestamp=completing_fill.source_timestamp,
+                    formed_at_receive_timestamp=completing_fill.receive_timestamp,
                 )
             )
             self._cumulative_paired += paired
