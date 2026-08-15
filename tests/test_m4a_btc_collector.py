@@ -7,7 +7,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from polymarket_edge_lab.shadow.btc_collector import LiveBtc60Collector
+from polymarket_edge_lab.shadow.btc_collector import (
+    LiveBtc60Collector,
+    load_latest_btc_candles,
+)
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 
 BASE = datetime(2026, 8, 15, 12, 3, 5, tzinfo=UTC)
@@ -74,6 +77,9 @@ async def test_poll_persists_raw_then_only_closed_causal_candles(tmp_path: Path)
     assert isinstance(raw_payload, dict)
     raw_path = tmp_path / str(raw_payload["raw_body_path"])
     assert raw_path.read_bytes() == raw
+    durable = load_latest_btc_candles(store)
+    assert [candle.open_epoch for candle in durable] == [1786795260, 1786795320]
+    assert all(candle.interval_seconds == 60 for candle in durable)
 
 
 @pytest.mark.asyncio
@@ -85,7 +91,12 @@ async def test_overlapping_poll_is_restart_idempotent(tmp_path: Path) -> None:
 
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        first = LiveBtc60Collector(run_id="run-live", store=store, client=client, clock=_Clock())
+        first = LiveBtc60Collector(
+            run_id="run-live",
+            store=store,
+            client=client,
+            clock=_Clock(),
+        )
         assert (await first.poll_once()).new_candle_count == 2
         restarted = LiveBtc60Collector(
             run_id="run-live",
@@ -118,22 +129,30 @@ async def test_revised_closed_candle_appends_superseding_event(tmp_path: Path) -
             client=client,
             clock=_Clock(),
         )
-        first = await collector.poll_once()
+        await collector.poll_once()
+        first_records = list(store.iter_records())
+        first_last_sequence = int(first_records[-1]["sequence"])
         second = await collector.poll_once()
 
-    assert first.new_candle_count == 2
     assert second.revised_candle_count == 1
-    candles = [record for record in store.iter_records() if record["event_type"] == "btc_candle"]
+    candles = [
+        record for record in store.iter_records() if record["event_type"] == "btc_candle"
+    ]
     target = [
         record
         for record in candles
-        if isinstance(record["payload"], dict) and record["payload"]["open_epoch"] == 1786795260
+        if isinstance(record["payload"], dict)
+        and record["payload"]["open_epoch"] == 1786795260
     ]
     assert len(target) == 2
     assert target[1]["supersedes_event_id"] == target[0]["event_id"]
     revised_payload = target[1]["payload"]
     assert isinstance(revised_payload, dict)
     assert revised_payload["close"] == "60101.50"
+    before_revision = load_latest_btc_candles(store, as_of_sequence=first_last_sequence)
+    after_revision = load_latest_btc_candles(store)
+    assert before_revision[0].close != after_revision[0].close
+    assert after_revision[0].close == 60101.50
 
 
 @pytest.mark.asyncio
@@ -155,7 +174,10 @@ async def test_http_error_body_is_durable_before_failure(tmp_path: Path) -> None
             await collector.poll_once()
 
     records = list(store.iter_records())
-    assert [record["event_type"] for record in records] == ["raw_observation", "source_health"]
+    assert [record["event_type"] for record in records] == [
+        "raw_observation",
+        "source_health",
+    ]
     payload = records[0]["payload"]
     assert isinstance(payload, dict)
     raw_path = tmp_path / str(payload["raw_body_path"])
