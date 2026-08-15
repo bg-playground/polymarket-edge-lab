@@ -16,6 +16,7 @@ EventType = Literal[
     "outcome_label",
     "score_binding",
     "source_health",
+    "state_quarantine",
     "state_reconciliation",
     "replay_audit",
 ]
