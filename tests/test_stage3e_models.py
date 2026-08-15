@@ -62,8 +62,7 @@ def test_nonlinear_evaluation_preserves_complete_window_holdouts() -> None:
 
 def test_advancement_gate_requires_mean_and_day_level_wins() -> None:
     hurdle_folds = [
-        {"held_out_window": str(index), "weighted_mae": 0.20, "brier": 0.24}
-        for index in range(7)
+        {"held_out_window": str(index), "weighted_mae": 0.20, "brier": 0.24} for index in range(7)
     ]
     winning_folds = []
     for index in range(7):
