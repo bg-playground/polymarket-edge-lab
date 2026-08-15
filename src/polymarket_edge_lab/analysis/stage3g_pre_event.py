@@ -160,7 +160,7 @@ def build_pre_event_rows(
                     "paired_shares": formed,
                     "pair_cost": pair_cost,
                     "favorable": pair_cost < ONE,
-                    "lag_seconds": lag,
+                    "lag_seconds_label_only": lag,
                     **pre,
                 }
                 for key, value in asdict(btc).items():
@@ -207,10 +207,10 @@ def audit_pre_event_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         target_sequence = row.get("prediction_fill_sequence")
         if prior_sequence is not None and int(prior_sequence) >= int(target_sequence):
             violations.append(f"row {index}: prior sequence is not strictly before target")
-        btc_epoch = row.get("btc_source_epoch")
+        btc_epoch = row.get("btc_reference_epoch")
         prediction_epoch = row.get("prediction_time_epoch")
         if btc_epoch is not None and int(btc_epoch) > int(prediction_epoch):
-            violations.append(f"row {index}: BTC source is later than prediction time")
+            violations.append(f"row {index}: BTC reference is later than prediction time")
     return {
         "row_count": len(rows),
         "violation_count": len(violations),
