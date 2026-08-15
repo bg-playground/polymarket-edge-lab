@@ -36,6 +36,34 @@ class EligibleMarketMetadata:
     def to_payload(self) -> dict[str, object]:
         return asdict(self)
 
+    def outcome_side_for_token(self, token_id: str) -> str | None:
+        if token_id == self.up_token_id:
+            return "UP"
+        if token_id == self.down_token_id:
+            return "DOWN"
+        return None
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, object]) -> EligibleMarketMetadata:
+        return cls(
+            condition_id=str(payload["condition_id"]),
+            gamma_market_id=str(payload["gamma_market_id"]),
+            slug=str(payload["slug"]),
+            question=str(payload["question"]) if payload.get("question") is not None else None,
+            market_start_epoch=int(payload["market_start_epoch"]),
+            market_end_epoch=int(payload["market_end_epoch"]),
+            up_token_id=str(payload["up_token_id"]),
+            down_token_id=str(payload["down_token_id"]),
+            active=payload.get("active") if isinstance(payload.get("active"), bool) else None,
+            closed=payload.get("closed") if isinstance(payload.get("closed"), bool) else None,
+            accepting_orders=(
+                payload.get("accepting_orders")
+                if isinstance(payload.get("accepting_orders"), bool)
+                else None
+            ),
+            raw_observation_sha256=str(payload["raw_observation_sha256"]),
+        )
+
 
 @dataclass(frozen=True)
 class MarketMetadataResult:
@@ -128,7 +156,32 @@ class LiveMarketMetadataResolver:
             store.path.parent / "raw" / "polymarket_gamma_markets"
         )
         self._raw_archive_dir.mkdir(parents=True, exist_ok=True)
-        self._cache: dict[str, MarketMetadataResult] = {}
+        self._cache = self._load_durable_cache()
+
+    def _load_durable_cache(self) -> dict[str, MarketMetadataResult]:
+        cache: dict[str, MarketMetadataResult] = {}
+        for record in self.store.iter_records():
+            if record.get("event_type") != "market_metadata":
+                continue
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            condition_id = str(payload.get("condition_id") or "")
+            if not condition_id:
+                continue
+            metadata_payload = payload.get("metadata")
+            metadata = (
+                EligibleMarketMetadata.from_payload(metadata_payload)
+                if isinstance(metadata_payload, dict)
+                else None
+            )
+            cache[condition_id.lower()] = MarketMetadataResult(
+                condition_id=condition_id,
+                eligible=bool(payload.get("eligible")),
+                reason_code=str(payload.get("reason_code") or "unknown"),
+                metadata=metadata,
+            )
+        return cache
 
     async def resolve(self, condition_id: str) -> MarketMetadataResult:
         key = condition_id.lower()
