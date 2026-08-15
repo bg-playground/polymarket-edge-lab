@@ -193,7 +193,9 @@ def evaluate_nonlinear_held_out(
     rows: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     windows = sorted({str(row["window_id"]) for row in rows})
-    results = {name: [] for name in NONLINEAR_FEATURE_SETS}
+    results: dict[str, list[dict[str, Any]]] = {
+        name: [] for name in NONLINEAR_FEATURE_SETS
+    }
     for held_out in windows:
         train = [row for row in rows if str(row["window_id"]) != held_out]
         test = [row for row in rows if str(row["window_id"]) == held_out]
