@@ -4,10 +4,10 @@ import asyncio
 import base64
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Callable
 
 import httpx
 
@@ -42,7 +42,7 @@ def _event_id(run_id: str, sequence: int) -> str:
 
 
 class LiveTargetAccountCollector:
-    """Read-only 1 Hz Polymarket Data API collector with append-before-normalize storage."""
+    """Read-only Data API collector with durable append-before-normalize storage."""
 
     def __init__(
         self,
@@ -83,15 +83,24 @@ class LiveTargetAccountCollector:
             "takerOnly": "false",
         }
         url = f"{self._base_url}/trades"
-        if self._client is None:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url, params=params)
-        else:
-            response = await self._client.get(url, params=params)
+        try:
+            if self._client is None:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(url, params=params)
+            else:
+                response = await self._client.get(url, params=params)
+        except httpx.HTTPError as exc:
+            self._append_source_health(
+                status="transport_failed",
+                detail=f"{type(exc).__name__}: {exc}",
+                observed_at=self._clock(),
+                raw_event_id=None,
+            )
+            raise
+
         response_receive = self._clock()
         raw_bytes = response.content
         response_sha256 = hashlib.sha256(raw_bytes).hexdigest()
-
         raw_sequence = self.store.next_sequence()
         raw_event_id = _event_id(self.run_id, raw_sequence)
         raw_payload: dict[str, object] = {
@@ -100,6 +109,8 @@ class LiveTargetAccountCollector:
             "request_params": dict(params),
             "request_start": request_start.astimezone(UTC).isoformat(),
             "response_receive": response_receive.astimezone(UTC).isoformat(),
+            "request_attempt": 1,
+            "retry_count": 0,
             "http_status": response.status_code,
             "response_sha256": response_sha256,
             "response_body_b64": base64.b64encode(raw_bytes).decode("ascii"),
@@ -125,7 +136,16 @@ class LiveTargetAccountCollector:
             )
             response.raise_for_status()
 
-        payload = json.loads(raw_bytes, parse_float=Decimal)
+        try:
+            payload = json.loads(raw_bytes, parse_float=Decimal)
+        except json.JSONDecodeError as exc:
+            self._append_source_health(
+                status="parse_failed",
+                detail=f"JSONDecodeError: {exc}",
+                observed_at=self._clock(),
+                raw_event_id=raw_event_id,
+            )
+            raise
         parse_complete = self._clock()
         if not isinstance(payload, list):
             self._append_source_health(
@@ -137,20 +157,33 @@ class LiveTargetAccountCollector:
             raise TypeError(f"expected list payload, got {type(payload).__name__}")
         raw_records = [record for record in payload if isinstance(record, dict)]
         if len(raw_records) != len(payload):
+            self._append_source_health(
+                status="parse_failed",
+                detail="trade payload contains a non-object record",
+                observed_at=parse_complete,
+                raw_event_id=raw_event_id,
+            )
             raise TypeError("trade payload contains a non-object record")
 
         for record in raw_records:
             wallet = str(record.get("proxyWallet", "")).lower()
             if wallet and wallet != self.account:
-                raise ValueError(
-                    f"Data API returned proxyWallet {wallet} for requested account {self.account}"
+                detail = (
+                    f"Data API returned proxyWallet {wallet} for requested "
+                    f"account {self.account}"
                 )
+                self._append_source_health(
+                    status="account_mismatch",
+                    detail=detail,
+                    observed_at=self._clock(),
+                    raw_event_id=raw_event_id,
+                )
+                raise ValueError(detail)
 
         normalized = normalize_records(raw_records, account=self.account)
         normalize_complete = self._clock()
         new_fill_count = 0
         duplicate_fill_count = 0
-
         for trade in normalized.accepted:
             if trade.source_trade_id in self._seen_source_trade_ids:
                 duplicate_fill_count += 1
@@ -168,7 +201,9 @@ class LiveTargetAccountCollector:
                 price=trade.price,
                 shares=trade.shares,
                 receive_timestamp=response_receive,
-                local_ingest_id=f"{raw_event_id}:{trade.raw_extra.get('_record_index', 0)}",
+                local_ingest_id=(
+                    f"{raw_event_id}:{trade.raw_extra.get('_record_index', 0)}"
+                ),
             )
             sequence = self.store.next_sequence()
             payload_record = fill.to_payload()
@@ -211,7 +246,12 @@ class LiveTargetAccountCollector:
         )
 
     def _append_source_health(
-        self, *, status: str, detail: str, observed_at: datetime, raw_event_id: str
+        self,
+        *,
+        status: str,
+        detail: str,
+        observed_at: datetime,
+        raw_event_id: str | None,
     ) -> None:
         sequence = self.store.next_sequence()
         self.store.append(
@@ -231,11 +271,16 @@ class LiveTargetAccountCollector:
             )
         )
 
-    async def run_forever(self, *, poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS) -> None:
+    async def run_forever(
+        self, *, poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
+    ) -> None:
         if poll_interval_seconds <= 0:
             raise ValueError("poll_interval_seconds must be positive")
         while True:
             started = asyncio.get_running_loop().time()
-            await self.poll_once()
+            try:
+                await self.poll_once()
+            except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError):
+                pass
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.0, poll_interval_seconds - elapsed))
