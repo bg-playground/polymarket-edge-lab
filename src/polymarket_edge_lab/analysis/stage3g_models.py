@@ -109,9 +109,7 @@ def _aggregate(folds: list[dict[str, Any]]) -> dict[str, float]:
             float(fold["weighted_mae"]) * float(fold["paired_share_weight"]) for fold in folds
         )
         / total_weight,
-        "brier": sum(
-            float(fold["brier"]) * float(fold["paired_share_weight"]) for fold in folds
-        )
+        "brier": sum(float(fold["brier"]) * float(fold["paired_share_weight"]) for fold in folds)
         / total_weight,
     }
 
@@ -141,8 +139,7 @@ def advancement_gate(
         "brier_better_than_hgb_timing_inventory": primary_agg["brier"] < hgb_agg["brier"],
         "mae_wins_at_least_4_of_7": mae_wins >= 4,
         "brier_wins_at_least_4_of_7": brier_wins >= 4,
-        "mae_better_than_linear_baseline": primary_agg["weighted_mae"]
-        < linear_agg["weighted_mae"],
+        "mae_better_than_linear_baseline": primary_agg["weighted_mae"] < linear_agg["weighted_mae"],
         "brier_better_than_linear_baseline": primary_agg["brier"] < linear_agg["brier"],
         "leakage_audit_passed": leakage_passed,
         "all_external_days_reportable": enough_days,
