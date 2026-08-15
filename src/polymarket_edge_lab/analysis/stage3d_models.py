@@ -108,9 +108,9 @@ def _classification_metrics(
         target = float(label)
         bounded = min(1.0 - eps, max(eps, probability))
         brier_terms.append(weight * (bounded - target) ** 2)
-        loss_terms.append(
-            weight * (-(target * log(bounded) + (1.0 - target) * log(1.0 - bounded)))
-        )
+        positive_loss = target * log(bounded)
+        negative_loss = (1.0 - target) * log(1.0 - bounded)
+        loss_terms.append(weight * -(positive_loss + negative_loss))
     return sum(brier_terms) / total, sum(loss_terms) / total
 
 
@@ -152,15 +152,16 @@ def _global_predictions(
 ) -> tuple[list[float], list[float]]:
     weights = _weights(train)
     total = sum(weights)
-    weighted_costs = (
+    weighted_costs = [
         float(row["pair_cost"]) * weight
         for row, weight in zip(train, weights, strict=True)
-    )
-    mean_cost = sum(weighted_costs) / total
-    favorable_rate = sum(
+    ]
+    weighted_labels = [
         float(bool(row["favorable"])) * weight
         for row, weight in zip(train, weights, strict=True)
-    ) / total
+    ]
+    mean_cost = sum(weighted_costs) / total
+    favorable_rate = sum(weighted_labels) / total
     return [mean_cost] * len(test), [favorable_rate] * len(test)
 
 
