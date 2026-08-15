@@ -154,14 +154,14 @@ def _applied_fills(records: list[dict[str, object]], market_id: str) -> list[_Ap
         if payload.get("status") != "applied":
             continue
         fill_event_id = str(payload["normalized_fill_event_id"])
-        fill = fills.get(fill_event_id)
-        if fill is None:
+        applied_fill = fills.get(fill_event_id)
+        if applied_fill is None:
             raise ValueError(f"state application references missing fill {fill_event_id}")
         result.append(
             _AppliedFill(
                 application_sequence=int(str(record["sequence"])),
                 fill_event_id=fill_event_id,
-                fill=fill,
+                fill=applied_fill,
             )
         )
     return result
