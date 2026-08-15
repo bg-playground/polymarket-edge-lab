@@ -56,7 +56,10 @@ class FrozenModelMetadata:
 
 def _matrix(rows: list[dict[str, Any]], features: tuple[str, ...]) -> list[list[float]]:
     return [
-        [float(row[feature]) if row.get(feature) is not None else float("nan") for feature in features]
+        [
+            float(row[feature]) if row.get(feature) is not None else float("nan")
+            for feature in features
+        ]
         for row in rows
     ]
 
@@ -134,7 +137,11 @@ def fit_and_write_frozen_models(
         features = MODEL_FEATURES[name]
         matrix = _matrix(rows, features)
         regressor, classifier = _build_models(name)
-        regressor.fit(matrix, [float(row["pair_cost"]) for row in rows], model__sample_weight=weights)
+        regressor.fit(
+            matrix,
+            [float(row["pair_cost"]) for row in rows],
+            model__sample_weight=weights,
+        )
         classifier.fit(
             matrix,
             [int(bool(row["favorable"])) for row in rows],
