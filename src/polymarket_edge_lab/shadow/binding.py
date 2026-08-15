@@ -186,7 +186,9 @@ class ProspectiveOutcomeBinder:
                         else "unbound_no_strictly_prior_score"
                     ),
                     "prediction_event_id": (
-                        None if selected_prediction is None else str(selected_prediction["event_id"])
+                        None
+                        if selected_prediction is None
+                        else str(selected_prediction["event_id"])
                     ),
                     "score_id": (
                         None if prediction_payload is None else prediction_payload.get("score_id")
