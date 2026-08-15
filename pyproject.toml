@@ -54,5 +54,5 @@ strict = true
 packages = ["polymarket_edge_lab"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.parquet", "tenacity", "sklearn.*"]
+module = ["joblib", "pyarrow", "pyarrow.parquet", "tenacity", "sklearn.*"]
 ignore_missing_imports = true
