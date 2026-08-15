@@ -264,7 +264,9 @@ class LiveBtc60Collector:
 
         receive_epoch = int(response_receive.timestamp())
         parsed = [_parse_candle_row(row) for row in payload]
-        causal = [(candle, volume) for candle, volume in parsed if candle.close_epoch <= receive_epoch]
+        causal = [
+            item for item in parsed if item[0].close_epoch <= receive_epoch
+        ]
         new_count = 0
         revised_count = 0
         duplicate_count = 0
