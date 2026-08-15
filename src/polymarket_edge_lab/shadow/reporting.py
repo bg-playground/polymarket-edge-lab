@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
@@ -62,10 +63,6 @@ def _weighted_mean(values: list[tuple[float, float]]) -> float | None:
     return sum(value * item_weight for value, item_weight in values) / weight
 
 
-def _utc_date(value: object) -> date:
-    return datetime.fromisoformat(str(value)).astimezone(UTC).date()
-
-
 def _elapsed_days(started_at: datetime, generated_at: datetime) -> int:
     return (generated_at.astimezone(UTC).date() - started_at.astimezone(UTC).date()).days + 1
 
@@ -108,15 +105,24 @@ def build_prospective_report(
         elif event_type == "score_binding":
             bindings[str(pair_id)] = record
 
-    bound_rows: list[tuple[dict[str, object], dict[str, object], dict[str, object]]] = []
+    if set(outcomes) != set(pairs):
+        raise ValueError("prospective report requires complete outcome-label coverage")
+    if set(bindings) != set(pairs):
+        raise ValueError("prospective report requires complete score-binding coverage")
+
+    bound_rows: list[tuple[dict[str, object], dict[str, object]]] = []
     unbound = 0
+    evaluated_pairs = 0
     day_counts: dict[date, int] = defaultdict(int)
-    for pair_id, pair in pairs.items():
-        binding = bindings.get(pair_id)
-        outcome = outcomes.get(pair_id)
-        if binding is None or outcome is None:
+    for pair_id in pairs:
+        outcome_payload = _payload(outcomes[pair_id], "outcome_label")
+        formed_dt = datetime.fromisoformat(
+            str(outcome_payload["formed_at_source_timestamp"])
+        ).astimezone(UTC)
+        if not 12 <= formed_dt.hour < 18:
             continue
-        binding_payload = _payload(binding, "score_binding")
+        evaluated_pairs += 1
+        binding_payload = _payload(bindings[pair_id], "score_binding")
         if binding_payload.get("status") != "bound_strictly_prior_score":
             unbound += 1
             continue
@@ -129,12 +135,7 @@ def build_prospective_report(
             raise ValueError("bound prediction is not advancement eligible")
         if prediction_payload.get("event_conditioned_reconstruction") is not False:
             raise ValueError("event-conditioned prediction entered prospective report")
-        outcome_payload = _payload(outcome, "outcome_label")
-        formed_at = outcome_payload["formed_at_source_timestamp"]
-        formed_dt = datetime.fromisoformat(str(formed_at)).astimezone(UTC)
-        if not 12 <= formed_dt.hour < 18:
-            continue
-        bound_rows.append((prediction_payload, outcome_payload, pair))
+        bound_rows.append((prediction_payload, outcome_payload))
         day_counts[formed_dt.date()] += 1
 
     model_metrics: dict[str, ModelMetrics] = {}
@@ -143,7 +144,7 @@ def build_prospective_report(
         absolute_errors: list[tuple[float, float]] = []
         brier_errors: list[tuple[float, float]] = []
         bins: list[list[tuple[float, float, float]]] = [[] for _ in range(CALIBRATION_BINS)]
-        for prediction_payload, outcome_payload, _pair in bound_rows:
+        for prediction_payload, outcome_payload in bound_rows:
             outputs = prediction_payload.get("model_outputs")
             if not isinstance(outputs, dict):
                 raise ValueError("prediction model_outputs must be an object")
@@ -171,37 +172,47 @@ def build_prospective_report(
                 "bin_index": index,
                 "row_count": len(items),
                 "paired_share_weight": sum(item[2] for item in items),
-                "weighted_mean_probability": _weighted_mean([(item[0], item[2]) for item in items]),
-                "weighted_favorable_rate": _weighted_mean([(item[1], item[2]) for item in items]),
+                "weighted_mean_probability": _weighted_mean(
+                    [(item[0], item[2]) for item in items]
+                ),
+                "weighted_favorable_rate": _weighted_mean(
+                    [(item[1], item[2]) for item in items]
+                ),
             }
             for index, items in enumerate(bins)
         ]
 
-    freshness_pairs: dict[str, list[tuple[float, float]]] = {
+    diagnostics: dict[str, list[tuple[float, float]]] = {
         "btc_age_seconds": [],
         "target_source_age_seconds": [],
+        "score_write_latency_ms": [],
     }
-    for prediction_payload, outcome_payload, _pair in bound_rows:
+    for prediction_payload, outcome_payload in bound_rows:
         weight = float(str(outcome_payload["paired_shares"]))
         freshness = prediction_payload.get("input_freshness")
-        if not isinstance(freshness, dict):
-            continue
-        for key in freshness_pairs:
-            value = freshness.get(key)
-            if value is not None:
-                freshness_pairs[key].append((float(str(value)), weight))
-    freshness = {key: _weighted_mean(values) for key, values in freshness_pairs.items()}
+        if isinstance(freshness, dict):
+            for key in ("btc_age_seconds", "target_source_age_seconds"):
+                value = freshness.get(key)
+                if value is not None:
+                    diagnostics[key].append((float(str(value)), weight))
+        score_timestamp = prediction_payload.get("score_timestamp")
+        write_started_at = prediction_payload.get("write_started_at")
+        if score_timestamp is not None and write_started_at is not None:
+            score_dt = datetime.fromisoformat(str(score_timestamp))
+            write_dt = datetime.fromisoformat(str(write_started_at))
+            latency_ms = max(0.0, (write_dt - score_dt).total_seconds() * 1000.0)
+            diagnostics["score_write_latency_ms"].append((latency_ms, weight))
+    freshness = {key: _weighted_mean(values) for key, values in diagnostics.items()}
 
     reportable_days = sorted(
         day.isoformat() for day, count in day_counts.items() if count >= REPORTABLE_DAY_MIN_BOUND_ROWS
     )
     elapsed = _elapsed_days(started_at, generated_at)
     bound_count = len(bound_rows)
-    coverage_denominator = bound_count + unbound
-    coverage = None if coverage_denominator == 0 else bound_count / coverage_denominator
+    coverage = None if evaluated_pairs == 0 else bound_count / evaluated_pairs
     bound_weight = sum(
         float(str(outcome_payload["paired_shares"]))
-        for _prediction_payload, outcome_payload, _pair in bound_rows
+        for _prediction_payload, outcome_payload in bound_rows
     )
     replay_records = [record for record in records if record.get("event_type") == "replay_audit"]
     replay_status = "not_recorded"
@@ -220,7 +231,7 @@ def build_prospective_report(
         evaluation_started_at=started_at.isoformat(),
         generated_at=generated_at.astimezone(UTC).isoformat(),
         elapsed_calendar_days=elapsed,
-        total_pair_rows=len(pairs),
+        total_pair_rows=evaluated_pairs,
         prospectively_bound_rows=bound_count,
         unbound_rows=unbound,
         bound_coverage_rate=coverage,
@@ -241,6 +252,4 @@ def write_report_json(report: ProspectiveReport, path: Path) -> None:
 
 
 def json_dumps(report: ProspectiveReport) -> str:
-    import json
-
     return json.dumps(asdict(report), indent=2, sort_keys=True)
