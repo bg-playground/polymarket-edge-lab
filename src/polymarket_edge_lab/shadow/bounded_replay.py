@@ -7,7 +7,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
 
-from polymarket_edge_lab.analysis.stage3g_models import MODEL_FEATURES
 from polymarket_edge_lab.shadow.events import EventEnvelope, EventType
 from polymarket_edge_lab.shadow.feature_builder import LiveStage3GFeatureBuilder
 from polymarket_edge_lab.shadow.replay import replay_arrival_time
