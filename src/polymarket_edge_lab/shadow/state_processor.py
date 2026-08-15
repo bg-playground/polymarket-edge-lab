@@ -52,9 +52,7 @@ def _pair_payload(
         "down_price": str(pair.down_price),
         "pair_cost": str(pair.pair_cost),
         "lag_seconds": pair.lag_seconds,
-        "formed_at_source_timestamp": (
-            pair.formed_at_source_timestamp.astimezone(UTC).isoformat()
-        ),
+        "formed_at_source_timestamp": (pair.formed_at_source_timestamp.astimezone(UTC).isoformat()),
         "formed_at_receive_timestamp": (
             pair.formed_at_receive_timestamp.astimezone(UTC).isoformat()
         ),
@@ -138,10 +136,7 @@ class LiveStateProcessor:
             except MarketStateQuarantinedError as exc:
                 pairs = []
                 status = _quarantine_status(fill, exc)
-                if (
-                    status == "quarantined"
-                    and fill_event_id not in self._persisted_quarantines
-                ):
+                if status == "quarantined" and fill_event_id not in self._persisted_quarantines:
                     self._append_quarantine(fill_event_id, exc.record, fill.receive_timestamp)
                     self._persisted_quarantines.add(fill_event_id)
                     quarantine_count += 1
