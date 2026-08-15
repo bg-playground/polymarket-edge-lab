@@ -122,7 +122,11 @@ def build_pre_event_rows(
         recent: deque[_PriorFill] = deque()
         cumulative_paired = ZERO
 
-        for row in sorted(market_rows, key=lambda item: (item.timestamp, item.fill_sequence_number)):
+        ordered_rows = sorted(
+            market_rows,
+            key=lambda item: (item.timestamp, item.fill_sequence_number),
+        )
+        for row in ordered_rows:
             side = row.normalized_outcome_side
             if side not in {"UP", "DOWN"}:
                 continue
