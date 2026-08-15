@@ -1,0 +1,58 @@
+{
+  "schema_version": "m4a-frozen-model-freeze-v1",
+  "stage3g_source": {
+    "workflow_run_id": 31890475572,
+    "artifact_id": 9248520442,
+    "artifact_api_digest": "sha256:5400b32db51ee2ec323cc2e3722fd5a0f0c8ace4cb1215de75045cc71f8dd696",
+    "source_commit": "253f0e36f519d9438f51a3e446b333d2bab8fc5f",
+    "discovery_panel_sha256": "acc8e15261b03b5f9caf6b757415b4c58efc831a8224663d9a5bd48a9388aead",
+    "discovery_manifest_sha256": "5073f7ef54428c2fdf6bbbe52b8aeb472d7c16c0f880104f3e4dd954503f8eb0",
+    "stage3g_results_sha256": "55ec335b39c998accc3bee433110af11af47dac192e05a891a6cc7eb6a9b4534"
+  },
+  "materialization": {
+    "workflow_run_id": 31892813338,
+    "artifact_id": 9248997758,
+    "artifact_api_digest": "sha256:ef4a132f1087cc66180f4affdcfc82cc7270df09a64bf6a7a4f3425b20bf4df3",
+    "python_version": "3.12.13",
+    "sklearn_version": "1.9.0",
+    "training_row_count": 19644,
+    "training_paired_share_weight": 130382.129063,
+    "training_windows": [
+      "discovery-2026-08-07T12-18Z",
+      "discovery-2026-08-08T12-18Z",
+      "discovery-2026-08-09T12-18Z",
+      "discovery-2026-08-10T12-18Z",
+      "discovery-2026-08-11T12-18Z",
+      "discovery-2026-08-12T12-18Z",
+      "discovery-2026-08-13T12-18Z"
+    ]
+  },
+  "models": {
+    "hgb_all_pre_event": {
+      "regressor_sha256": "c3d450117d8cff491b29ecd0330f5f5584e6487ee2f0e3cdadc64418fe428262",
+      "classifier_sha256": "231eee0bd896bd294b65f78157346b54db4dbe1bdaa533a33b79c9468e8958d8",
+      "preprocessing_fingerprint": "125ab457603b1e8818f513d5464761c40908488839af29815663c1d75a278e5d"
+    },
+    "hgb_timing_inventory": {
+      "regressor_sha256": "4952e88052267de240891e63c76067a1cd867d885b798196e7709c9509a9c586",
+      "classifier_sha256": "dcbc52e959eab416f0c7bcb5c9231e02840979f19d5daaae5a91df5e9e3f5ac7",
+      "preprocessing_fingerprint": "c7fe14310ccbb63016c807cad510d9f2a88f0de8db98fa7d1cada1bfe23f5f57"
+    },
+    "linear_timing_inventory": {
+      "regressor_sha256": "73f0b9a53e390cc9ebe75b021d13acd86608e024936466744797bbea7a2712a7",
+      "classifier_sha256": "97f06b34f19d06403a96a333a66635048477a39ab1bfc9efb3b6a56641faa73e",
+      "preprocessing_fingerprint": "cb2cbed1def7cf5d5af844540f6da3163a3b78808587249382f2ec1b54b0b4ff"
+    },
+    "hgb_timing_inventory_btc60": {
+      "regressor_sha256": "1983e5476ace5a4d9dac690d00a0443ff6f027a69e1aab7586008e19bb7bca07",
+      "classifier_sha256": "f76ccb0646818fcee62d864341bada1185c4da6ec697019f43e52aaa65cbc357",
+      "preprocessing_fingerprint": "7decdff43c3ac02a9670061b50f6e2078223e6e3c80a208d096456261089d674"
+    }
+  },
+  "freeze_policy": {
+    "primary_model": "hgb_all_pre_event",
+    "live_outcome_refit_allowed": false,
+    "feature_or_parameter_changes_require_new_spec": true,
+    "fingerprint_change_invalidates_frozen_evaluation_window": true
+  }
+}
