@@ -8,7 +8,10 @@ import pyarrow.parquet as pq
 
 from polymarket_edge_lab.analysis.bounded_pair_claim import fully_contained_btc_5m_market_ids
 from polymarket_edge_lab.analysis.btc_features import BtcCandle
-from polymarket_edge_lab.analysis.stage3g_pre_event import audit_pre_event_rows, build_pre_event_rows
+from polymarket_edge_lab.analysis.stage3g_pre_event import (
+    audit_pre_event_rows,
+    build_pre_event_rows,
+)
 from polymarket_edge_lab.reconstruction.ledger import build_canonical_ledger
 from polymarket_edge_lab.storage.normalized import load_duckdb
 
