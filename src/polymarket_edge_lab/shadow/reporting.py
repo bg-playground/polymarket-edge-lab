@@ -172,12 +172,8 @@ def build_prospective_report(
                 "bin_index": index,
                 "row_count": len(items),
                 "paired_share_weight": sum(item[2] for item in items),
-                "weighted_mean_probability": _weighted_mean(
-                    [(item[0], item[2]) for item in items]
-                ),
-                "weighted_favorable_rate": _weighted_mean(
-                    [(item[1], item[2]) for item in items]
-                ),
+                "weighted_mean_probability": _weighted_mean([(item[0], item[2]) for item in items]),
+                "weighted_favorable_rate": _weighted_mean([(item[1], item[2]) for item in items]),
             }
             for index, items in enumerate(bins)
         ]
