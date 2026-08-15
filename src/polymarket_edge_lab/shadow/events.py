@@ -11,6 +11,8 @@ EventType = Literal[
     "normalized_fill",
     "btc_candle",
     "market_metadata",
+    "pair_formation",
+    "state_application",
     "score_attempt",
     "prediction",
     "unscorable_tick",
