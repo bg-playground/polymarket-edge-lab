@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from polymarket_edge_lab.analysis.stage3g_pre_event import audit_pre_event_rows, build_pre_event_rows
+from polymarket_edge_lab.analysis.stage3g_pre_event import (
+    audit_pre_event_rows,
+    build_pre_event_rows,
+)
 from polymarket_edge_lab.models.reconstruction import LedgerEntry
 
 
@@ -15,7 +18,7 @@ def _fill(sequence: int, epoch: int, side: str, price: str, shares: str) -> Ledg
         asset_id=f"asset-{side}",
         outcome=side,
         side="BUY",
-        timestamp=datetime.fromtimestamp(epoch, tz=timezone.utc),
+        timestamp=datetime.fromtimestamp(epoch, tz=UTC),
         price=Decimal(price),
         shares=Decimal(shares),
         notional=Decimal(price) * Decimal(shares),
