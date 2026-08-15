@@ -153,12 +153,10 @@ def _global_predictions(
     weights = _weights(train)
     total = sum(weights)
     weighted_costs = [
-        float(row["pair_cost"]) * weight
-        for row, weight in zip(train, weights, strict=True)
+        float(row["pair_cost"]) * weight for row, weight in zip(train, weights, strict=True)
     ]
     weighted_labels = [
-        float(bool(row["favorable"])) * weight
-        for row, weight in zip(train, weights, strict=True)
+        float(bool(row["favorable"])) * weight for row, weight in zip(train, weights, strict=True)
     ]
     mean_cost = sum(weighted_costs) / total
     favorable_rate = sum(weighted_labels) / total
