@@ -46,8 +46,8 @@ def _envelope(record: dict[str, object]) -> EventEnvelope:
 
 
 def _assert_close(actual: object, expected: object, tolerance: float) -> None:
-    actual_value = float(actual)
-    expected_value = float(expected)
+    actual_value = float(str(actual))
+    expected_value = float(str(expected))
     if math.isnan(actual_value) and math.isnan(expected_value):
         return
     if not math.isclose(actual_value, expected_value, rel_tol=tolerance, abs_tol=tolerance):
