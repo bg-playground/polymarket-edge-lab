@@ -60,17 +60,13 @@ def test_outcome_order_controls_token_mapping() -> None:
 
 
 def test_non_stage3g_slug_fails_closed() -> None:
-    result = classify_gamma_market(
-        _market(slug="bitcoin-up-or-down"), response_sha256="c" * 64
-    )
+    result = classify_gamma_market(_market(slug="bitcoin-up-or-down"), response_sha256="c" * 64)
     assert result.eligible is False
     assert result.reason_code == "not_stage3g_btc_5m_slug"
 
 
 def test_ambiguous_outcomes_fail_closed() -> None:
-    result = classify_gamma_market(
-        _market(outcomes='["Yes","No"]'), response_sha256="d" * 64
-    )
+    result = classify_gamma_market(_market(outcomes='["Yes","No"]'), response_sha256="d" * 64)
     assert result.eligible is False
     assert result.reason_code == "outcomes_not_unambiguous_up_down"
 
