@@ -44,6 +44,9 @@ def test_classification_preserves_stage3g_slug_start_and_maps_tokens() -> None:
     assert result.metadata.market_end_epoch == START + 300
     assert result.metadata.up_token_id == "token-up"
     assert result.metadata.down_token_id == "token-down"
+    assert result.metadata.outcome_side_for_token("token-up") == "UP"
+    assert result.metadata.outcome_side_for_token("token-down") == "DOWN"
+    assert result.metadata.outcome_side_for_token("other") is None
 
 
 def test_outcome_order_controls_token_mapping() -> None:
@@ -85,15 +88,13 @@ async def test_resolver_persists_raw_metadata_and_caches_result(tmp_path: Path) 
 
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        resolver = LiveMarketMetadataResolver(
-            run_id="run-1",
-            store=store,
-            client=client,
-        )
+        resolver = LiveMarketMetadataResolver(run_id="run-1", store=store, client=client)
         first = await resolver.resolve(CONDITION_ID)
         second = await resolver.resolve(CONDITION_ID)
+        restarted = LiveMarketMetadataResolver(run_id="run-1", store=store, client=client)
+        third = await restarted.resolve(CONDITION_ID)
 
-    assert first == second
+    assert first == second == third
     assert requests == 1
     records = list(store.iter_records())
     assert [record["event_type"] for record in records] == [
@@ -122,11 +123,7 @@ async def test_condition_lookup_must_be_unique(tmp_path: Path) -> None:
 
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        resolver = LiveMarketMetadataResolver(
-            run_id="run-1",
-            store=store,
-            client=client,
-        )
+        resolver = LiveMarketMetadataResolver(run_id="run-1", store=store, client=client)
         result = await resolver.resolve(CONDITION_ID)
 
     assert result.eligible is False
