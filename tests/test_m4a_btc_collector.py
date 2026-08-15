@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -131,7 +132,7 @@ async def test_revised_closed_candle_appends_superseding_event(tmp_path: Path) -
         )
         await collector.poll_once()
         first_records = list(store.iter_records())
-        first_last_sequence = int(first_records[-1]["sequence"])
+        first_last_sequence = int(str(first_records[-1]["sequence"]))
         second = await collector.poll_once()
 
     assert second.revised_candle_count == 1
@@ -152,7 +153,7 @@ async def test_revised_closed_candle_appends_superseding_event(tmp_path: Path) -
     before_revision = load_latest_btc_candles(store, as_of_sequence=first_last_sequence)
     after_revision = load_latest_btc_candles(store)
     assert before_revision[0].close != after_revision[0].close
-    assert after_revision[0].close == 60101.50
+    assert after_revision[0].close == Decimal("60101.50")
 
 
 @pytest.mark.asyncio
