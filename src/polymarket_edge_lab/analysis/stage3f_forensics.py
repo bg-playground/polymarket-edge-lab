@@ -83,7 +83,9 @@ def held_out_btc_permutation_results(rows: list[dict[str, Any]]) -> list[dict[st
         test = [row for row in rows if str(row["window_id"]) == held_out]
         base_costs, base_probabilities = _hgb_predictions(train, test, ALL_FEATURES)
         base = _fold_payload(held_out, test, base_costs, base_probabilities)
-        groups = [(feature, (feature,)) for feature in BTC_FEATURES]
+        groups: list[tuple[str, tuple[str, ...]]] = [
+            (feature, (feature,)) for feature in BTC_FEATURES
+        ]
         groups.append(("btc_joint", BTC_FEATURES))
         for feature_index, (name, features) in enumerate(groups):
             permuted = _permuted_rows(test, features, 1000 + window_index * 100 + feature_index)
