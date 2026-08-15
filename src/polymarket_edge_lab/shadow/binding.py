@@ -35,13 +35,18 @@ def _prediction_is_eligible(record: dict[str, object], market_id: str) -> bool:
 
 
 def _latest_strictly_prior_prediction(
-    records: list[dict[str, object]], *, market_id: str, source_second_epoch: int
+    records: list[dict[str, object]],
+    *,
+    market_id: str,
+    source_second_epoch: int,
+    pair_sequence: int,
 ) -> dict[str, object] | None:
     boundary_ms = source_second_epoch * 1000
     candidates = [
         record
         for record in records
-        if _prediction_is_eligible(record, market_id)
+        if int(str(record["sequence"])) < pair_sequence
+        and _prediction_is_eligible(record, market_id)
         and int(_created_at(record).timestamp() * 1000) < boundary_ms
     ]
     if not candidates:
@@ -89,28 +94,20 @@ class ProspectiveOutcomeBinder:
                 records,
                 market_id=market_id,
                 source_second_epoch=source_second_epoch,
+                pair_sequence=int(str(record["sequence"])),
+            )
+            self._append_binding(
+                pair_event_id=pair_event_id,
+                outcome_label_event_id=outcome_event_id,
+                market_id=market_id,
+                source_second_epoch=source_second_epoch,
+                selected_prediction=selected,
+                created_at=_created_at(record),
             )
             if selected is None:
-                self._append_binding(
-                    pair_event_id=pair_event_id,
-                    outcome_label_event_id=outcome_event_id,
-                    market_id=market_id,
-                    source_second_epoch=source_second_epoch,
-                    selected_prediction=None,
-                    created_at=_created_at(record),
-                )
                 unbound += 1
             else:
-                self._append_binding(
-                    pair_event_id=pair_event_id,
-                    outcome_label_event_id=outcome_event_id,
-                    market_id=market_id,
-                    source_second_epoch=source_second_epoch,
-                    selected_prediction=selected,
-                    created_at=_created_at(record),
-                )
                 bound += 1
-
             self._processed_pair_event_ids.add(pair_event_id)
 
         return BindingProcessResult(labeled, bound, unbound)
