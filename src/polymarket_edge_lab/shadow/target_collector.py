@@ -93,9 +93,7 @@ class LiveTargetAccountCollector:
                 os.fsync(handle.fileno())
         except FileExistsError as exc:
             if path.read_bytes() != raw_bytes:
-                raise ValueError(
-                    f"raw archive hash collision or corruption at {path}"
-                ) from exc
+                raise ValueError(f"raw archive hash collision or corruption at {path}") from exc
         return path
 
     async def poll_once(self) -> PollResult:
@@ -196,8 +194,7 @@ class LiveTargetAccountCollector:
             wallet = str(record.get("proxyWallet", "")).lower()
             if wallet and wallet != self.account:
                 detail = (
-                    f"Data API returned proxyWallet {wallet} for requested "
-                    f"account {self.account}"
+                    f"Data API returned proxyWallet {wallet} for requested account {self.account}"
                 )
                 self._append_source_health(
                     status="account_mismatch",
@@ -228,9 +225,7 @@ class LiveTargetAccountCollector:
                 price=trade.price,
                 shares=trade.shares,
                 receive_timestamp=response_receive,
-                local_ingest_id=(
-                    f"{raw_event_id}:{trade.raw_extra.get('_record_index', 0)}"
-                ),
+                local_ingest_id=(f"{raw_event_id}:{trade.raw_extra.get('_record_index', 0)}"),
             )
             sequence = self.store.next_sequence()
             payload_record = fill.to_payload()
