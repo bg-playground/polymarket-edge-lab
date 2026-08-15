@@ -97,6 +97,38 @@ def _parse_candle_row(row: object) -> tuple[BtcCandle, Decimal]:
     )
 
 
+def _candle_from_payload(payload: dict[str, object]) -> BtcCandle:
+    return BtcCandle(
+        open_epoch=int(str(payload["open_epoch"])),
+        open=Decimal(str(payload["open"])),
+        high=Decimal(str(payload["high"])),
+        low=Decimal(str(payload["low"])),
+        close=Decimal(str(payload["close"])),
+        interval_seconds=int(str(payload["interval_seconds"])),
+    )
+
+
+def load_latest_btc_candles(
+    store: AppendOnlyEventStore, *, as_of_sequence: int | None = None
+) -> list[BtcCandle]:
+    """Rebuild the latest BTC candle version known by a durable append sequence."""
+    latest: dict[int, BtcCandle] = {}
+    for record in store.iter_records():
+        sequence = int(str(record["sequence"]))
+        if as_of_sequence is not None and sequence > as_of_sequence:
+            break
+        if record.get("event_type") != "btc_candle":
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("btc_candle payload must be an object")
+        candle = _candle_from_payload(payload)
+        if candle.interval_seconds != GRANULARITY_SECONDS:
+            raise ValueError("durable BTC candle does not use frozen 60-second resolution")
+        latest[candle.open_epoch] = candle
+    return [latest[epoch] for epoch in sorted(latest)]
+
+
 class LiveBtc60Collector:
     """Read-only Coinbase Exchange collector for closed BTC-USD 60-second candles."""
 
