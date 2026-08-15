@@ -9,6 +9,7 @@ from polymarket_edge_lab.shadow.feature_builder import (
     LiveStage3GFeatureBuilder,
 )
 from polymarket_edge_lab.shadow.market_metadata import EligibleMarketMetadata
+from polymarket_edge_lab.shadow.scorer import LiveShadowScorer
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 
 Clock = Callable[[], datetime]
@@ -54,16 +55,18 @@ def active_market_ids(
 
 
 class LiveFeatureCadence:
-    """Drive 1 Hz feature attempts only for durably known active Stage 3G markets."""
+    """Drive 1 Hz feature attempts and optional frozen shadow scoring."""
 
     def __init__(
         self,
         *,
         builder: LiveStage3GFeatureBuilder,
         store: AppendOnlyEventStore,
+        scorer: LiveShadowScorer | None = None,
     ) -> None:
         self.builder = builder
         self.store = store
+        self.scorer = scorer
 
     def tick(self, *, tick_time: datetime) -> None:
         cutoff_sequence = self.store.next_sequence() - 1
@@ -77,6 +80,8 @@ class LiveFeatureCadence:
                 tick_time=tick_time,
                 as_of_sequence=cutoff_sequence,
             )
+        if self.scorer is not None:
+            self.scorer.process_pending()
 
     async def run_forever(
         self,
