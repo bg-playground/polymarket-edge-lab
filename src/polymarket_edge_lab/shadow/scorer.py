@@ -7,7 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import joblib  # type: ignore[import-untyped]
 from sklearn.pipeline import Pipeline
