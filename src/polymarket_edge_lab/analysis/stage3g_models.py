@@ -8,12 +8,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from polymarket_edge_lab.analysis.stage3d_models import BTC_FEATURES, INVENTORY_FEATURES
-from polymarket_edge_lab.analysis.stage3e_models import (
-    _classification_metrics,
-    _fold_payload,
-    _hgb_predictions,
-    _regression_metrics,
-)
+from polymarket_edge_lab.analysis.stage3e_models import _fold_payload, _hgb_predictions
 
 PRE_TIMING_FEATURES = ("elapsed_seconds", "seconds_remaining")
 PRE_INVENTORY_FEATURES = INVENTORY_FEATURES
