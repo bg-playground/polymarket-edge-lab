@@ -76,6 +76,7 @@ def main() -> None:
             f"- {name}: weighted MAE **{float(metrics['weighted_mae']):.6f}**, "
             f"Brier **{float(metrics['brier']):.6f}**"
         )
+    gate_passed = external["external_confirmation_gate_passed"]
     lines.extend(
         [
             "",
@@ -84,7 +85,7 @@ def main() -> None:
                 "Brier day wins vs HGB T+I: "
                 f"**{external['brier_day_wins_vs_hgb_timing_inventory']}/7**"
             ),
-            f"External confirmation gate passed: **{external['external_confirmation_gate_passed']}**",
+            f"External confirmation gate passed: **{gate_passed}**",
             "",
             "These results are historical explanatory evidence, not a live trading recommendation.",
         ]
