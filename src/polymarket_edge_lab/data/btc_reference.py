@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -67,6 +68,17 @@ def load_coinbase_candles(raw_path: Path, *, interval_seconds: int = 60) -> list
     return sorted(by_epoch.values(), key=lambda candle: candle.open_epoch)
 
 
+def _get_coinbase_page(
+    client: httpx.Client, params: dict[str, str | int], *, max_attempts: int = 5
+) -> httpx.Response:
+    for attempt in range(max_attempts):
+        response = client.get(COINBASE_CANDLES_URL, params=params)
+        if response.status_code != 429 or attempt == max_attempts - 1:
+            return response
+        time.sleep(float(2**attempt))
+    raise RuntimeError("unreachable Coinbase retry state")
+
+
 def collect_coinbase_btc_usd(
     *,
     start_epoch: int,
@@ -93,13 +105,14 @@ def collect_coinbase_btc_usd(
                 "end": _iso(chunk_end),
                 "granularity": granularity_seconds,
             }
-            response = client.get(COINBASE_CANDLES_URL, params=params)
+            response = _get_coinbase_page(client, params)
             response.raise_for_status()
             payload = response.json()
             raw_pages.append({"params": params, "payload": payload})
             for candle in _parse_rows(payload, interval_seconds=granularity_seconds):
                 by_epoch[candle.open_epoch] = candle
             cursor = chunk_end
+            time.sleep(0.25)
 
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_bytes = json.dumps(raw_pages, sort_keys=True, separators=(",", ":")).encode()
