@@ -5,6 +5,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from polymarket_edge_lab.shadow.market_metadata import LiveMarketMetadataResolver
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 from polymarket_edge_lab.shadow.target_collector import (
     DEFAULT_POLL_INTERVAL_SECONDS,
@@ -16,10 +17,12 @@ FROZEN_TARGET_ACCOUNT = "0xbf337426aa856996b8bb79b238345dd1a0276bf7"
 
 async def _run(args: argparse.Namespace) -> None:
     store = AppendOnlyEventStore(args.event_log)
+    metadata_resolver = LiveMarketMetadataResolver(run_id=args.run_id, store=store)
     collector = LiveTargetAccountCollector(
         account=args.account,
         run_id=args.run_id,
         store=store,
+        metadata_resolver=metadata_resolver,
         page_limit=args.page_limit,
     )
     await collector.run_forever(poll_interval_seconds=args.poll_interval)
@@ -27,7 +30,7 @@ async def _run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the read-only Milestone 4A target-account Data API collector"
+        description="Run the read-only Milestone 4A metadata-gated target collector"
     )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--event-log", type=Path, required=True)
