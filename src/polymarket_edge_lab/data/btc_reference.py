@@ -34,7 +34,7 @@ def _iso(epoch: int) -> str:
     return datetime.fromtimestamp(epoch, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
-def _parse_rows(payload: Any) -> list[BtcCandle]:
+def _parse_rows(payload: Any, *, interval_seconds: int = 60) -> list[BtcCandle]:
     if not isinstance(payload, list):
         raise ValueError("Coinbase candle response must be a list")
     candles: list[BtcCandle] = []
@@ -48,9 +48,23 @@ def _parse_rows(payload: Any) -> list[BtcCandle]:
                 high=Decimal(str(row[2])),
                 open=Decimal(str(row[3])),
                 close=Decimal(str(row[4])),
+                interval_seconds=interval_seconds,
             )
         )
     return sorted(candles, key=lambda candle: candle.open_epoch)
+
+
+def load_coinbase_candles(raw_path: Path, *, interval_seconds: int = 60) -> list[BtcCandle]:
+    raw_pages = json.loads(raw_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_pages, list):
+        raise ValueError("Preserved Coinbase evidence must be a list of pages")
+    by_epoch: dict[int, BtcCandle] = {}
+    for page in raw_pages:
+        if not isinstance(page, dict) or "payload" not in page:
+            raise ValueError("Unexpected preserved Coinbase page")
+        for candle in _parse_rows(page["payload"], interval_seconds=interval_seconds):
+            by_epoch[candle.open_epoch] = candle
+    return sorted(by_epoch.values(), key=lambda candle: candle.open_epoch)
 
 
 def collect_coinbase_btc_usd(
@@ -83,7 +97,7 @@ def collect_coinbase_btc_usd(
             response.raise_for_status()
             payload = response.json()
             raw_pages.append({"params": params, "payload": payload})
-            for candle in _parse_rows(payload):
+            for candle in _parse_rows(payload, interval_seconds=granularity_seconds):
                 by_epoch[candle.open_epoch] = candle
             cursor = chunk_end
 

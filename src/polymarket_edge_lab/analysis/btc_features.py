@@ -14,6 +14,11 @@ class BtcCandle:
     high: Decimal
     low: Decimal
     close: Decimal
+    interval_seconds: int = 1
+
+    @property
+    def close_epoch(self) -> int:
+        return self.open_epoch + self.interval_seconds
 
 
 @dataclass(frozen=True)
@@ -48,15 +53,14 @@ def _sample_std(values: list[Decimal]) -> Decimal | None:
 
 
 def _close_at_or_before(candles: list[BtcCandle], epoch: int) -> Decimal | None:
-    candidates = [candle.close for candle in candles if candle.open_epoch + 1 <= epoch]
+    candidates = [candle.close for candle in candles if candle.close_epoch <= epoch]
     return candidates[-1] if candidates else None
 
 
 def _returns(candles: list[BtcCandle], start_epoch: int, end_epoch: int) -> list[Decimal]:
     selected: list[Decimal] = []
     for candle in candles:
-        close_epoch = candle.open_epoch + 1
-        if start_epoch < close_epoch <= end_epoch:
+        if start_epoch < candle.close_epoch <= end_epoch:
             selected.append(candle.close)
 
     returns: list[Decimal] = []
@@ -72,7 +76,7 @@ def build_btc_features(
 ) -> BtcFeatureRow:
     """Align only candles whose close is observable at or before event_epoch."""
     causal = sorted(
-        (candle for candle in candles if candle.open_epoch + 1 <= event_epoch),
+        (candle for candle in candles if candle.close_epoch <= event_epoch),
         key=lambda candle: candle.open_epoch,
     )
     if not causal:
@@ -94,9 +98,17 @@ def build_btc_features(
 
     latest = causal[-1]
     current = latest.close
+    source_resolution = max(candle.interval_seconds for candle in causal)
 
     def trailing_return(seconds: int) -> Decimal | None:
+        if seconds < source_resolution:
+            return None
         return _safe_return(current, _close_at_or_before(causal, event_epoch - seconds))
+
+    def realized_vol(seconds: int) -> Decimal | None:
+        if seconds < source_resolution:
+            return None
+        return _sample_std(_returns(causal, event_epoch - seconds, event_epoch))
 
     ret60 = trailing_return(60)
     start_price = (
@@ -107,7 +119,7 @@ def build_btc_features(
     if market_start_epoch is not None:
         market_candles: list[BtcCandle] = []
         for candle in causal:
-            if candle.open_epoch + 1 >= market_start_epoch:
+            if candle.close_epoch >= market_start_epoch:
                 market_candles.append(candle)
 
         if market_candles and start_price not in {None, ZERO}:
@@ -117,15 +129,15 @@ def build_btc_features(
 
     return BtcFeatureRow(
         event_epoch=event_epoch,
-        reference_epoch=latest.open_epoch + 1,
+        reference_epoch=latest.close_epoch,
         reference_price=current,
         return_15s=trailing_return(15),
         return_30s=trailing_return(30),
         return_60s=ret60,
         return_120s=trailing_return(120),
-        realized_vol_30s=_sample_std(_returns(causal, event_epoch - 30, event_epoch)),
-        realized_vol_60s=_sample_std(_returns(causal, event_epoch - 60, event_epoch)),
-        realized_vol_120s=_sample_std(_returns(causal, event_epoch - 120, event_epoch)),
+        realized_vol_30s=realized_vol(30),
+        realized_vol_60s=realized_vol(60),
+        realized_vol_120s=realized_vol(120),
         absolute_return_60s=abs(ret60) if ret60 is not None else None,
         return_since_market_start=since_start,
         range_since_market_start=range_since_start,
