@@ -7,6 +7,7 @@ from typing import Literal
 
 EventType = Literal[
     "raw_observation",
+    "fill_admission",
     "normalized_fill",
     "btc_candle",
     "market_metadata",
