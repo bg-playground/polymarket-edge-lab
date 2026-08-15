@@ -136,9 +136,7 @@ def _market_quarantined(records: list[dict[str, object]], market_id: str) -> boo
     return False
 
 
-def _applied_fills(
-    records: list[dict[str, object]], market_id: str
-) -> list[_AppliedFill]:
+def _applied_fills(records: list[dict[str, object]], market_id: str) -> list[_AppliedFill]:
     fills: dict[str, NormalizedFill] = {}
     result: list[_AppliedFill] = []
     for record in records:
@@ -192,9 +190,7 @@ def _feature_state(applied: list[_AppliedFill], event_epoch: int) -> _FeatureSta
     def trailing(seconds: int) -> tuple[int, Decimal]:
         cutoff = event_epoch - seconds
         selected = [
-            fill
-            for fill in buys
-            if cutoff <= int(fill.source_timestamp.timestamp()) <= event_epoch
+            fill for fill in buys if cutoff <= int(fill.source_timestamp.timestamp()) <= event_epoch
         ]
         return len(selected), sum((fill.shares for fill in selected), start=ZERO)
 
@@ -218,15 +214,10 @@ def _feature_state(applied: list[_AppliedFill], event_epoch: int) -> _FeatureSta
         for left, right in zip(trailing60, trailing60[1:], strict=False)
         if left.outcome_side != right.outcome_side
     )
-    same_second = sum(
-        1 for fill in buys if int(fill.source_timestamp.timestamp()) == event_epoch
-    )
+    same_second = sum(1 for fill in buys if int(fill.source_timestamp.timestamp()) == event_epoch)
     max_source = max((fill.source_timestamp for fill in buys), default=None)
     max_key = max(
-        (
-            (fill.source_timestamp, fill.source_trade_id, fill.local_ingest_id)
-            for fill in buys
-        ),
+        ((fill.source_timestamp, fill.source_trade_id, fill.local_ingest_id) for fill in buys),
         default=None,
     )
     max_receive = max((fill.receive_timestamp for fill in buys), default=None)
@@ -358,11 +349,7 @@ class LiveStage3GFeatureBuilder:
                 cutoff_sequence,
                 "outside_market_window",
             )
-        if not (
-            EVALUATION_START_HOUR_UTC
-            <= tick_time.hour
-            < EVALUATION_END_HOUR_UTC
-        ):
+        if not (EVALUATION_START_HOUR_UTC <= tick_time.hour < EVALUATION_END_HOUR_UTC):
             return self._unscorable(
                 market_id,
                 tick_time,
@@ -482,9 +469,7 @@ class LiveStage3GFeatureBuilder:
                         if max_key is None
                         else [max_key[0].astimezone(UTC).isoformat(), max_key[1], max_key[2]]
                     ),
-                    "applied_buy_fill_count": sum(
-                        1 for item in applied if item.fill.side == "BUY"
-                    ),
+                    "applied_buy_fill_count": sum(1 for item in applied if item.fill.side == "BUY"),
                 },
             )
         )
