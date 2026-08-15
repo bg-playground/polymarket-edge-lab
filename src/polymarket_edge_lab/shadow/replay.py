@@ -4,7 +4,13 @@ from collections import defaultdict
 from datetime import datetime
 
 from polymarket_edge_lab.shadow.events import NormalizedFill
-from polymarket_edge_lab.shadow.state import MarketOnlineState, MarketStateSnapshot, PairFormation
+from polymarket_edge_lab.shadow.state import (
+    MarketOnlineState,
+    MarketStateQuarantinedError,
+    MarketStateSnapshot,
+    PairFormation,
+    QuarantineRecord,
+)
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 
 
@@ -14,10 +20,12 @@ class ReplayResult:
         *,
         snapshots: dict[str, MarketStateSnapshot],
         pair_formations: list[PairFormation],
+        quarantines: list[QuarantineRecord],
         processed_events: int,
     ) -> None:
         self.snapshots = snapshots
         self.pair_formations = pair_formations
+        self.quarantines = quarantines
         self.processed_events = processed_events
 
 
@@ -25,6 +33,7 @@ def replay_arrival_time(store: AppendOnlyEventStore) -> ReplayResult:
     """Replay normalized fills in exact durable append order without external API access."""
     states: dict[str, MarketOnlineState] = {}
     formations: list[PairFormation] = []
+    quarantines: list[QuarantineRecord] = []
     processed = 0
 
     for expected_sequence, record in enumerate(store.iter_records()):
@@ -41,12 +50,17 @@ def replay_arrival_time(store: AppendOnlyEventStore) -> ReplayResult:
             raise ValueError("normalized_fill payload must be an object")
         fill = NormalizedFill.from_payload(payload)
         state = states.setdefault(fill.market_id, MarketOnlineState(fill.market_id))
-        formations.extend(state.apply(fill))
+        try:
+            formations.extend(state.apply(fill))
+        except MarketStateQuarantinedError as exc:
+            if not quarantines or quarantines[-1] != exc.record:
+                quarantines.append(exc.record)
 
     snapshots = {market_id: state.snapshot() for market_id, state in states.items()}
     return ReplayResult(
         snapshots=snapshots,
         pair_formations=formations,
+        quarantines=quarantines,
         processed_events=processed,
     )
 
