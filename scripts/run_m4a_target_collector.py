@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 
 from polymarket_edge_lab.shadow.market_metadata import LiveMarketMetadataResolver
+from polymarket_edge_lab.shadow.state_processor import LiveStateProcessor
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 from polymarket_edge_lab.shadow.target_collector import (
     DEFAULT_POLL_INTERVAL_SECONDS,
@@ -13,6 +14,12 @@ from polymarket_edge_lab.shadow.target_collector import (
 )
 
 FROZEN_TARGET_ACCOUNT = "0xbf337426aa856996b8bb79b238345dd1a0276bf7"
+
+
+async def _run_state_processor(processor: LiveStateProcessor, interval: float) -> None:
+    while True:
+        processor.process_pending()
+        await asyncio.sleep(interval)
 
 
 async def _run(args: argparse.Namespace) -> None:
@@ -25,7 +32,11 @@ async def _run(args: argparse.Namespace) -> None:
         metadata_resolver=metadata_resolver,
         page_limit=args.page_limit,
     )
-    await collector.run_forever(poll_interval_seconds=args.poll_interval)
+    state_processor = LiveStateProcessor(run_id=args.run_id, store=store)
+    await asyncio.gather(
+        collector.run_forever(poll_interval_seconds=args.poll_interval),
+        _run_state_processor(state_processor, args.poll_interval),
+    )
 
 
 def main() -> None:
