@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-import joblib  # type: ignore[import-untyped]
+import joblib
 from sklearn.pipeline import Pipeline
 
 from polymarket_edge_lab.analysis.stage3g_models import MODEL_FEATURES
