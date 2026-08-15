@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 
@@ -53,6 +54,7 @@ class LiveTargetAccountCollector:
         client: httpx.AsyncClient | None = None,
         base_url: str = DATA_API_BASE,
         page_limit: int = DEFAULT_PAGE_LIMIT,
+        raw_archive_dir: Path | None = None,
         clock: Clock = _utc_now,
     ) -> None:
         self.account = account.lower()
@@ -62,6 +64,10 @@ class LiveTargetAccountCollector:
         self._base_url = base_url.rstrip("/")
         self._page_limit = page_limit
         self._clock = clock
+        self._raw_archive_dir = raw_archive_dir or (
+            store.path.parent / "raw" / "polymarket_data_api"
+        )
+        self._raw_archive_dir.mkdir(parents=True, exist_ok=True)
         self._seen_source_trade_ids = self._load_seen_source_trade_ids()
 
     def _load_seen_source_trade_ids(self) -> set[str]:
@@ -73,6 +79,22 @@ class LiveTargetAccountCollector:
             if isinstance(payload, dict) and payload.get("source_trade_id") is not None:
                 seen.add(str(payload["source_trade_id"]))
         return seen
+
+    def _persist_raw_bytes(self, raw_bytes: bytes, response_sha256: str) -> Path:
+        path = self._raw_archive_dir / f"{response_sha256}.bin"
+        if path.exists():
+            if path.read_bytes() != raw_bytes:
+                raise ValueError(f"raw archive hash collision or corruption at {path}")
+            return path
+        try:
+            with path.open("xb") as handle:
+                handle.write(raw_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError:
+            if path.read_bytes() != raw_bytes:
+                raise ValueError(f"raw archive hash collision or corruption at {path}")
+        return path
 
     async def poll_once(self) -> PollResult:
         request_start = self._clock()
@@ -101,6 +123,8 @@ class LiveTargetAccountCollector:
         response_receive = self._clock()
         raw_bytes = response.content
         response_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        raw_path = self._persist_raw_bytes(raw_bytes, response_sha256)
+        relative_raw_path = raw_path.relative_to(self.store.path.parent)
         raw_sequence = self.store.next_sequence()
         raw_event_id = _event_id(self.run_id, raw_sequence)
         raw_payload: dict[str, object] = {
@@ -113,7 +137,8 @@ class LiveTargetAccountCollector:
             "retry_count": 0,
             "http_status": response.status_code,
             "response_sha256": response_sha256,
-            "response_body_b64": base64.b64encode(raw_bytes).decode("ascii"),
+            "raw_body_path": str(relative_raw_path),
+            "raw_body_size": len(raw_bytes),
         }
         self.store.append(
             EventEnvelope(
