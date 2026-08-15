@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -75,7 +74,8 @@ async def test_poll_persists_exact_raw_bytes_before_normalized_fill(tmp_path: Pa
     ]
     raw_payload = records[0]["payload"]
     assert isinstance(raw_payload, dict)
-    assert base64.b64decode(str(raw_payload["response_body_b64"])) == raw
+    raw_path = tmp_path / str(raw_payload["raw_body_path"])
+    assert raw_path.read_bytes() == raw
     normalized_payload = records[1]["payload"]
     assert isinstance(normalized_payload, dict)
     assert normalized_payload["raw_observation_event_id"] == records[0]["event_id"]
@@ -83,7 +83,9 @@ async def test_poll_persists_exact_raw_bytes_before_normalized_fill(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_overlapping_poll_deduplicates_normalized_fill_across_restart(tmp_path: Path) -> None:
+async def test_overlapping_poll_deduplicates_normalized_fill_across_restart(
+    tmp_path: Path,
+) -> None:
     raw = json.dumps([_trade()], separators=(",", ":")).encode()
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -113,6 +115,9 @@ async def test_overlapping_poll_deduplicates_normalized_fill_across_restart(tmp_
     types = [record["event_type"] for record in store.iter_records()]
     assert types.count("raw_observation") == 2
     assert types.count("normalized_fill") == 1
+    raw_files = list((tmp_path / "raw" / "polymarket_data_api").glob("*.bin"))
+    assert len(raw_files) == 1
+    assert raw_files[0].read_bytes() == raw
 
 
 @pytest.mark.asyncio
@@ -135,8 +140,37 @@ async def test_http_error_body_is_durable_before_failure(tmp_path: Path) -> None
             await collector.poll_once()
 
     records = list(store.iter_records())
-    assert [record["event_type"] for record in records] == ["raw_observation", "source_health"]
+    assert [record["event_type"] for record in records] == [
+        "raw_observation",
+        "source_health",
+    ]
     payload = records[0]["payload"]
     assert isinstance(payload, dict)
     assert payload["http_status"] == 503
-    assert base64.b64decode(str(payload["response_body_b64"])) == raw
+    raw_path = tmp_path / str(payload["raw_body_path"])
+    assert raw_path.read_bytes() == raw
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_is_recorded_as_source_health(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        store = AppendOnlyEventStore(tmp_path / "events.ndjson")
+        collector = LiveTargetAccountCollector(
+            account=ACCOUNT,
+            run_id="run-live",
+            store=store,
+            client=client,
+            clock=_Clock(),
+        )
+        with pytest.raises(httpx.ConnectError):
+            await collector.poll_once()
+
+    records = list(store.iter_records())
+    assert len(records) == 1
+    assert records[0]["event_type"] == "source_health"
+    payload = records[0]["payload"]
+    assert isinstance(payload, dict)
+    assert payload["status"] == "transport_failed"
