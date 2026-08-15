@@ -207,12 +207,14 @@ def audit_pre_event_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for index, row in enumerate(rows):
         prior_sequence = row.get("max_prior_fill_sequence")
         target_sequence = row.get("prediction_fill_sequence")
-        if prior_sequence is not None and int(prior_sequence) >= int(target_sequence):
-            violations.append(f"row {index}: prior sequence is not strictly before target")
+        if prior_sequence is not None and target_sequence is not None:
+            if int(prior_sequence) >= int(target_sequence):
+                violations.append(f"row {index}: prior sequence is not strictly before target")
         btc_epoch = row.get("btc_reference_epoch")
         prediction_epoch = row.get("prediction_time_epoch")
-        if btc_epoch is not None and int(btc_epoch) > int(prediction_epoch):
-            violations.append(f"row {index}: BTC reference is later than prediction time")
+        if btc_epoch is not None and prediction_epoch is not None:
+            if int(btc_epoch) > int(prediction_epoch):
+                violations.append(f"row {index}: BTC reference is later than prediction time")
     return {
         "row_count": len(rows),
         "violation_count": len(violations),
