@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -543,9 +543,10 @@ class LiveStage3GFeatureBuilder:
                 created_at=tick_time,
                 payload={
                     "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                    "model_name": PRIMARY_MODEL_NAME,
                     "market_id": market_id,
+                    "tick_timestamp": tick_time.isoformat(),
                     "event_epoch": int(tick_time.timestamp()),
-                    "tick_timestamp": tick_time.astimezone(UTC).isoformat(),
                     "as_of_sequence": as_of_sequence,
                     "reason_code": reason_code,
                 },
