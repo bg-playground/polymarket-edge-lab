@@ -45,6 +45,29 @@ def _event(fill: NormalizedFill, sequence: int) -> EventEnvelope:
     )
 
 
+def _quarantine_event(
+    sequence: int,
+    *,
+    source_trade_id: str,
+    reason_code: str,
+    detail: str,
+) -> EventEnvelope:
+    return EventEnvelope(
+        schema_version="m4a-event-v1",
+        event_type="state_quarantine",
+        event_id=f"event-{sequence}",
+        run_id="run-1",
+        sequence=sequence,
+        created_at=datetime(2026, 8, 15, 12, 0, 4, tzinfo=UTC),
+        payload={
+            "market_id": "market-1",
+            "source_trade_id": source_trade_id,
+            "reason_code": reason_code,
+            "detail": detail,
+        },
+    )
+
+
 def test_fifo_pair_formation_and_idempotence() -> None:
     state = MarketOnlineState("market-1")
     assert state.apply(_fill("u1", "BUY", "UP", "5", "0.44", 1)) == []
@@ -140,7 +163,7 @@ def test_arrival_time_replay_reproduces_live_state(tmp_path: Path) -> None:
     assert replay.quarantines == []
 
 
-def test_replay_reproduces_quarantine_decision(tmp_path: Path) -> None:
+def test_replay_reproduces_and_verifies_quarantine_decision(tmp_path: Path) -> None:
     fills = [
         _fill("u1", "BUY", "UP", "5", "0.44", 1),
         _fill("d1", "BUY", "DOWN", "3", "0.51", 2),
@@ -149,6 +172,14 @@ def test_replay_reproduces_quarantine_decision(tmp_path: Path) -> None:
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     for sequence, fill in enumerate(fills):
         store.append(_event(fill, sequence))
+    store.append(
+        _quarantine_event(
+            3,
+            source_trade_id="s1",
+            reason_code="sell_would_unwind_paired_inventory",
+            detail="sell cannot be satisfied entirely from observable unpaired FIFO residual",
+        )
+    )
 
     replay = replay_arrival_time(store)
     snapshot = replay.snapshots["market-1"]
@@ -157,6 +188,23 @@ def test_replay_reproduces_quarantine_decision(tmp_path: Path) -> None:
     assert snapshot.applied_fill_count == 2
     assert len(replay.quarantines) == 1
     assert replay.quarantines[0].source_trade_id == "s1"
+
+
+def test_replay_rejects_missing_durable_quarantine_record(tmp_path: Path) -> None:
+    store = AppendOnlyEventStore(tmp_path / "events.ndjson")
+    fills = [
+        _fill("u1", "BUY", "UP", "5", "0.44", 1),
+        _fill("d1", "BUY", "DOWN", "3", "0.51", 2),
+        _fill("s1", "SELL", "UP", "3", "0.55", 3),
+    ]
+    for sequence, fill in enumerate(fills):
+        store.append(_event(fill, sequence))
+    try:
+        replay_arrival_time(store)
+    except ValueError as exc:
+        assert "missing durable state_quarantine" in str(exc)
+    else:
+        raise AssertionError("missing quarantine record must fail replay audit")
 
 
 def test_canonical_key_uses_source_id_before_local_ingest_tie_breaker() -> None:
