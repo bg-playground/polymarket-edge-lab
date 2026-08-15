@@ -180,7 +180,11 @@ async def test_unknown_asset_is_durably_rejected_and_deduplicated_after_restart(
     assert first.normalized_fill_count == 0
     assert first.unmapped_asset_count == 1
     assert second.duplicate_fill_count == 1
-    admissions = [record for record in store.iter_records() if record["event_type"] == "fill_admission"]
+    admissions = [
+        record
+        for record in store.iter_records()
+        if record["event_type"] == "fill_admission"
+    ]
     assert len(admissions) == 1
     payload = admissions[0]["payload"]
     assert isinstance(payload, dict)
