@@ -16,6 +16,7 @@ from polymarket_edge_lab.shadow.feature_builder import (
 )
 from polymarket_edge_lab.shadow.feature_cadence import LiveFeatureCadence
 from polymarket_edge_lab.shadow.market_metadata import LiveMarketMetadataResolver
+from polymarket_edge_lab.shadow.scorer import LiveShadowScorer
 from polymarket_edge_lab.shadow.state_processor import LiveStateProcessor
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 from polymarket_edge_lab.shadow.target_collector import (
@@ -51,7 +52,12 @@ async def _run(args: argparse.Namespace) -> None:
     binder = ProspectiveOutcomeBinder(run_id=args.run_id, store=store)
     btc_collector = LiveBtc60Collector(run_id=args.run_id, store=store)
     feature_builder = LiveStage3GFeatureBuilder(run_id=args.run_id, store=store)
-    feature_cadence = LiveFeatureCadence(builder=feature_builder, store=store)
+    scorer = LiveShadowScorer(
+        run_id=args.run_id,
+        store=store,
+        artifact_dir=args.artifact_dir,
+    )
+    feature_cadence = LiveFeatureCadence(builder=feature_builder, store=store, scorer=scorer)
     await asyncio.gather(
         collector.run_forever(poll_interval_seconds=args.poll_interval),
         _run_state_processor(state_processor, binder, args.poll_interval),
@@ -62,10 +68,11 @@ async def _run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the read-only Milestone 4A target/state/BTC/feature/binding pipeline"
+        description="Run the read-only Milestone 4A live shadow pipeline"
     )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--event-log", type=Path, required=True)
+    parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--account", default=FROZEN_TARGET_ACCOUNT)
     parser.add_argument("--page-limit", type=int, default=500)
     parser.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_INTERVAL_SECONDS)
