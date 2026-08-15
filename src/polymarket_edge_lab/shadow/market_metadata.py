@@ -18,6 +18,18 @@ GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 _BTC_5M_RE = re.compile(r"^btc-updown-5m-(\d+)$")
 
 
+def _payload_int(payload: dict[str, object], key: str) -> int:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"{key} must be an integer-compatible value")
+    return int(value)
+
+
+def _payload_optional_bool(payload: dict[str, object], key: str) -> bool | None:
+    value = payload.get(key)
+    return value if isinstance(value, bool) else None
+
+
 @dataclass(frozen=True)
 class EligibleMarketMetadata:
     condition_id: str
@@ -50,17 +62,13 @@ class EligibleMarketMetadata:
             gamma_market_id=str(payload["gamma_market_id"]),
             slug=str(payload["slug"]),
             question=str(payload["question"]) if payload.get("question") is not None else None,
-            market_start_epoch=int(payload["market_start_epoch"]),
-            market_end_epoch=int(payload["market_end_epoch"]),
+            market_start_epoch=_payload_int(payload, "market_start_epoch"),
+            market_end_epoch=_payload_int(payload, "market_end_epoch"),
             up_token_id=str(payload["up_token_id"]),
             down_token_id=str(payload["down_token_id"]),
-            active=payload.get("active") if isinstance(payload.get("active"), bool) else None,
-            closed=payload.get("closed") if isinstance(payload.get("closed"), bool) else None,
-            accepting_orders=(
-                payload.get("accepting_orders")
-                if isinstance(payload.get("accepting_orders"), bool)
-                else None
-            ),
+            active=_payload_optional_bool(payload, "active"),
+            closed=_payload_optional_bool(payload, "closed"),
+            accepting_orders=_payload_optional_bool(payload, "accepting_orders"),
             raw_observation_sha256=str(payload["raw_observation_sha256"]),
         )
 
