@@ -21,9 +21,7 @@ def _mean(folds: list[dict[str, Any]], metric: str) -> float:
     return sum(float(fold[metric]) for fold in folds) / len(folds)
 
 
-def _evaluate_hgb(
-    rows: list[dict[str, Any]], features: tuple[str, ...]
-) -> list[dict[str, Any]]:
+def _evaluate_hgb(rows: list[dict[str, Any]], features: tuple[str, ...]) -> list[dict[str, Any]]:
     windows = sorted({str(row["window_id"]) for row in rows})
     folds: list[dict[str, Any]] = []
     for held_out in windows:
@@ -47,19 +45,20 @@ def discovery_ablation_results(rows: list[dict[str, Any]]) -> dict[str, list[dic
 
 
 def summarize_ablation_results(
-    results: dict[str, list[dict[str, Any]]]
+    results: dict[str, list[dict[str, Any]]],
 ) -> dict[str, dict[str, float]]:
     baseline = results["timing_inventory"]
     baseline_mae = _mean(baseline, "weighted_mae")
     baseline_brier = _mean(baseline, "brier")
     summary: dict[str, dict[str, float]] = {}
     for name, folds in results.items():
+        weighted_mae = _mean(folds, "weighted_mae")
+        brier = _mean(folds, "brier")
         summary[name] = {
-            "weighted_mae": _mean(folds, "weighted_mae"),
-            "brier": _mean(folds, "brier"),
-            "weighted_mae_delta_vs_timing_inventory": _mean(folds, "weighted_mae")
-            - baseline_mae,
-            "brier_delta_vs_timing_inventory": _mean(folds, "brier") - baseline_brier,
+            "weighted_mae": weighted_mae,
+            "brier": brier,
+            "weighted_mae_delta_vs_timing_inventory": weighted_mae - baseline_mae,
+            "brier_delta_vs_timing_inventory": brier - baseline_brier,
         }
     return summary
 
