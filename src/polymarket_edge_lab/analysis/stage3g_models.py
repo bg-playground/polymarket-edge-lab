@@ -27,7 +27,10 @@ MODEL_FEATURES: dict[str, tuple[str, ...]] = {
 
 def _matrix(rows: list[dict[str, Any]], features: tuple[str, ...]) -> list[list[float]]:
     return [
-        [float(row[feature]) if row.get(feature) is not None else float("nan") for feature in features]
+        [
+            float(row[feature]) if row.get(feature) is not None else float("nan")
+            for feature in features
+        ]
         for row in rows
     ]
 
@@ -49,7 +52,8 @@ def _linear_predictions(
             ("model", Ridge(alpha=1.0)),
         ]
     )
-    regression.fit(x_train, [float(row["pair_cost"]) for row in train], model__sample_weight=weights)
+    y_cost = [float(row["pair_cost"]) for row in train]
+    regression.fit(x_train, y_cost, model__sample_weight=weights)
     classifier = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
@@ -131,11 +135,14 @@ def advancement_gate(
     )
     enough_days = len(primary) == 7 and all(int(fold["row_count"]) > 0 for fold in primary)
     checks = {
-        "mae_better_than_hgb_timing_inventory": primary_agg["weighted_mae"] < hgb_agg["weighted_mae"],
+        "mae_better_than_hgb_timing_inventory": (
+            primary_agg["weighted_mae"] < hgb_agg["weighted_mae"]
+        ),
         "brier_better_than_hgb_timing_inventory": primary_agg["brier"] < hgb_agg["brier"],
         "mae_wins_at_least_4_of_7": mae_wins >= 4,
         "brier_wins_at_least_4_of_7": brier_wins >= 4,
-        "mae_better_than_linear_baseline": primary_agg["weighted_mae"] < linear_agg["weighted_mae"],
+        "mae_better_than_linear_baseline": primary_agg["weighted_mae"]
+        < linear_agg["weighted_mae"],
         "brier_better_than_linear_baseline": primary_agg["brier"] < linear_agg["brier"],
         "leakage_audit_passed": leakage_passed,
         "all_external_days_reportable": enough_days,
