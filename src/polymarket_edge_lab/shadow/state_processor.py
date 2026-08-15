@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
 
 from polymarket_edge_lab.shadow.events import EventEnvelope, NormalizedFill
 from polymarket_edge_lab.shadow.state import (
@@ -38,7 +37,9 @@ def _snapshot_payload(snapshot: MarketStateSnapshot) -> dict[str, object]:
     }
 
 
-def _pair_payload(pair: PairFormation, normalized_fill_event_id: str, index: int) -> dict[str, object]:
+def _pair_payload(
+    pair: PairFormation, normalized_fill_event_id: str, index: int
+) -> dict[str, object]:
     return {
         "normalized_fill_event_id": normalized_fill_event_id,
         "pair_index": index,
@@ -54,6 +55,12 @@ def _pair_payload(pair: PairFormation, normalized_fill_event_id: str, index: int
         "formed_at_source_timestamp": pair.formed_at_source_timestamp.astimezone(UTC).isoformat(),
         "formed_at_receive_timestamp": pair.formed_at_receive_timestamp.astimezone(UTC).isoformat(),
     }
+
+
+def _quarantine_status(fill: NormalizedFill, exc: MarketStateQuarantinedError) -> str:
+    if exc.record.source_trade_id == fill.source_trade_id:
+        return "quarantined"
+    return "blocked_quarantined"
 
 
 class LiveStateProcessor:
@@ -96,8 +103,8 @@ class LiveStateProcessor:
             try:
                 state.apply(fill)
                 actual_status = "applied"
-            except MarketStateQuarantinedError:
-                actual_status = "quarantined"
+            except MarketStateQuarantinedError as exc:
+                actual_status = _quarantine_status(fill, exc)
             if actual_status != expected_status:
                 raise ValueError(
                     f"state application status mismatch for {fill_event_id}: "
@@ -126,8 +133,8 @@ class LiveStateProcessor:
                 pairs = state.apply(fill)
             except MarketStateQuarantinedError as exc:
                 pairs = []
-                status = "quarantined"
-                if fill_event_id not in self._persisted_quarantines:
+                status = _quarantine_status(fill, exc)
+                if status == "quarantined" and fill_event_id not in self._persisted_quarantines:
                     self._append_quarantine(fill_event_id, exc.record, fill.receive_timestamp)
                     self._persisted_quarantines.add(fill_event_id)
                     quarantine_count += 1
