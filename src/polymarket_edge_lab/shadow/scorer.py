@@ -64,7 +64,7 @@ def _utc_now() -> datetime:
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        for chunk in iter(lambda: handle.read(1024 * 1024, b"")):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -183,10 +183,14 @@ class LiveShadowScorer:
         fingerprints: dict[str, object] = {}
         for name in MODEL_NAMES:
             model = self.models[name]
-            matrix = [[
-                float(features[feature]) if features.get(feature) is not None else float("nan")
-                for feature in model.features
-            ]]
+            matrix = [
+                [
+                    float(features[feature])
+                    if features.get(feature) is not None
+                    else float("nan")
+                    for feature in model.features
+                ]
+            ]
             pair_cost = float(model.regressor.predict(matrix)[0])
             favorable_probability = float(model.classifier.predict_proba(matrix)[0, 1])
             outputs[name] = {
