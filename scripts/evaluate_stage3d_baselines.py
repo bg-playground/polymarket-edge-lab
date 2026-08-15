@@ -60,7 +60,10 @@ def main() -> None:
             "",
             "Negative deltas versus timing indicate improvement.",
             "",
-            "These are historical held-out explanatory results, not a live trading or future-profit claim.",
+            (
+                "These are historical held-out explanatory results, not a live trading "
+                "or future-profit claim."
+            ),
         ]
     )
     (args.output_dir / "stage3d_heldout_results.md").write_text(
