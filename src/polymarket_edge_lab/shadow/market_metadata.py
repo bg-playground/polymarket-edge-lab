@@ -90,9 +90,7 @@ def _parse_string_array(value: object, field: str) -> list[str]:
     return [str(item) for item in parsed]
 
 
-def classify_gamma_market(
-    record: dict[str, Any], *, response_sha256: str
-) -> MarketMetadataResult:
+def classify_gamma_market(record: dict[str, Any], *, response_sha256: str) -> MarketMetadataResult:
     condition_id = str(record.get("conditionId") or "")
     slug = str(record.get("slug") or "")
     match = _BTC_5M_RE.fullmatch(slug)
@@ -219,8 +217,7 @@ class LiveMarketMetadataResolver:
         matches = [
             record
             for record in payload
-            if isinstance(record, dict)
-            and str(record.get("conditionId") or "").lower() == key
+            if isinstance(record, dict) and str(record.get("conditionId") or "").lower() == key
         ]
         if len(matches) != 1:
             result = MarketMetadataResult(condition_id, False, "condition_lookup_not_unique", None)
