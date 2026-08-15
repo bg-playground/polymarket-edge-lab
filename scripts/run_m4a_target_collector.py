@@ -5,6 +5,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from polymarket_edge_lab.shadow.binding import ProspectiveOutcomeBinder
 from polymarket_edge_lab.shadow.btc_collector import (
     DEFAULT_POLL_INTERVAL_SECONDS as BTC_POLL_INTERVAL_SECONDS,
 )
@@ -25,9 +26,14 @@ from polymarket_edge_lab.shadow.target_collector import (
 FROZEN_TARGET_ACCOUNT = "0xbf337426aa856996b8bb79b238345dd1a0276bf7"
 
 
-async def _run_state_processor(processor: LiveStateProcessor, interval: float) -> None:
+async def _run_state_processor(
+    processor: LiveStateProcessor,
+    binder: ProspectiveOutcomeBinder,
+    interval: float,
+) -> None:
     while True:
         processor.process_pending()
+        binder.process_pending()
         await asyncio.sleep(interval)
 
 
@@ -42,12 +48,13 @@ async def _run(args: argparse.Namespace) -> None:
         page_limit=args.page_limit,
     )
     state_processor = LiveStateProcessor(run_id=args.run_id, store=store)
+    binder = ProspectiveOutcomeBinder(run_id=args.run_id, store=store)
     btc_collector = LiveBtc60Collector(run_id=args.run_id, store=store)
     feature_builder = LiveStage3GFeatureBuilder(run_id=args.run_id, store=store)
     feature_cadence = LiveFeatureCadence(builder=feature_builder, store=store)
     await asyncio.gather(
         collector.run_forever(poll_interval_seconds=args.poll_interval),
-        _run_state_processor(state_processor, args.poll_interval),
+        _run_state_processor(state_processor, binder, args.poll_interval),
         btc_collector.run_forever(poll_interval_seconds=args.btc_poll_interval),
         feature_cadence.run_forever(tick_interval_seconds=args.feature_tick_interval),
     )
@@ -55,7 +62,7 @@ async def _run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the read-only Milestone 4A target/state/BTC/feature pipeline"
+        description="Run the read-only Milestone 4A target/state/BTC/feature/binding pipeline"
     )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--event-log", type=Path, required=True)
