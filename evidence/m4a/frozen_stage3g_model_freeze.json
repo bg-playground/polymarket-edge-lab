@@ -10,9 +10,9 @@
     "stage3g_results_sha256": "55ec335b39c998accc3bee433110af11af47dac192e05a891a6cc7eb6a9b4534"
   },
   "materialization": {
-    "workflow_run_id": 31892813338,
-    "artifact_id": 9248997758,
-    "artifact_api_digest": "sha256:ef4a132f1087cc66180f4affdcfc82cc7270df09a64bf6a7a4f3425b20bf4df3",
+    "workflow_run_id": 31892943975,
+    "artifact_id": 9249030431,
+    "artifact_api_digest": "sha256:f623029c640016104427265f669dbe2628173c096409cbda5b1549d01a8851df",
     "python_version": "3.12.13",
     "sklearn_version": "1.9.0",
     "training_row_count": 19644,
