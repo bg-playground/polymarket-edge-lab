@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 from polymarket_edge_lab.shadow.binding import ProspectiveOutcomeBinder
@@ -10,6 +11,12 @@ from polymarket_edge_lab.shadow.btc_collector import (
     DEFAULT_POLL_INTERVAL_SECONDS as BTC_POLL_INTERVAL_SECONDS,
 )
 from polymarket_edge_lab.shadow.btc_collector import LiveBtc60Collector
+from polymarket_edge_lab.shadow.evaluation import (
+    FROZEN_TARGET_ACCOUNT,
+    FrozenEvaluationConfig,
+    start_frozen_evaluation,
+    verify_frozen_evaluation,
+)
 from polymarket_edge_lab.shadow.feature_builder import (
     DEFAULT_TICK_INTERVAL_SECONDS,
     LiveStage3GFeatureBuilder,
@@ -24,8 +31,6 @@ from polymarket_edge_lab.shadow.target_collector import (
     LiveTargetAccountCollector,
 )
 
-FROZEN_TARGET_ACCOUNT = "0xbf337426aa856996b8bb79b238345dd1a0276bf7"
-
 
 async def _run_state_processor(
     processor: LiveStateProcessor,
@@ -38,8 +43,32 @@ async def _run_state_processor(
         await asyncio.sleep(interval)
 
 
+def _evaluation_preflight(args: argparse.Namespace, store: AppendOnlyEventStore) -> None:
+    if not args.frozen_evaluation:
+        return
+    if not args.repository_commit:
+        raise ValueError("--repository-commit is required for --frozen-evaluation")
+    config = FrozenEvaluationConfig(
+        run_id=args.run_id,
+        repository_commit=args.repository_commit,
+        artifact_dir=args.artifact_dir,
+        target_account=args.account,
+        target_poll_interval_seconds=args.poll_interval,
+        feature_tick_interval_seconds=args.feature_tick_interval,
+    )
+    if store.next_sequence() == 0:
+        start_frozen_evaluation(
+            store=store,
+            config=config,
+            started_at=datetime.now(tz=UTC),
+        )
+    else:
+        verify_frozen_evaluation(store=store, config=config)
+
+
 async def _run(args: argparse.Namespace) -> None:
     store = AppendOnlyEventStore(args.event_log)
+    _evaluation_preflight(args, store)
     metadata_resolver = LiveMarketMetadataResolver(run_id=args.run_id, store=store)
     collector = LiveTargetAccountCollector(
         account=args.account,
@@ -82,6 +111,8 @@ def main() -> None:
         type=float,
         default=DEFAULT_TICK_INTERVAL_SECONDS,
     )
+    parser.add_argument("--frozen-evaluation", action="store_true")
+    parser.add_argument("--repository-commit")
     args = parser.parse_args()
     try:
         asyncio.run(_run(args))
