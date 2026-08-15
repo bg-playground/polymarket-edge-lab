@@ -196,14 +196,16 @@ def _timing_bucket_predictions(
         grouped.setdefault(_timing_bucket(row), []).append(row)
     stats: dict[tuple[str, str], tuple[float, float]] = {}
     for key, rows in grouped.items():
-        cost, probability = _global_predictions(rows, rows[:1])
-        stats[key] = (cost[0], probability[0])
+        bucket_costs, bucket_probabilities = _global_predictions(rows, rows[:1])
+        stats[key] = (bucket_costs[0], bucket_probabilities[0])
     costs: list[float] = []
     probabilities: list[float] = []
     for row in test:
-        cost, probability = stats.get(_timing_bucket(row), (global_cost[0], global_prob[0]))
-        costs.append(cost)
-        probabilities.append(probability)
+        predicted_cost, predicted_probability = stats.get(
+            _timing_bucket(row), (global_cost[0], global_prob[0])
+        )
+        costs.append(predicted_cost)
+        probabilities.append(predicted_probability)
     return costs, probabilities
 
 
