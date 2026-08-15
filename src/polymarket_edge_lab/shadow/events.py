@@ -13,6 +13,7 @@ EventType = Literal[
     "market_metadata",
     "pair_formation",
     "state_application",
+    "feature_snapshot",
     "score_attempt",
     "prediction",
     "unscorable_tick",
