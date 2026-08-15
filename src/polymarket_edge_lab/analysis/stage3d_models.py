@@ -152,9 +152,14 @@ def _global_predictions(
 ) -> tuple[list[float], list[float]]:
     weights = _weights(train)
     total = sum(weights)
-    mean_cost = sum(float(row["pair_cost"]) * weight for row, weight in zip(train, weights, strict=True)) / total
+    weighted_costs = (
+        float(row["pair_cost"]) * weight
+        for row, weight in zip(train, weights, strict=True)
+    )
+    mean_cost = sum(weighted_costs) / total
     favorable_rate = sum(
-        float(bool(row["favorable"])) * weight for row, weight in zip(train, weights, strict=True)
+        float(bool(row["favorable"])) * weight
+        for row, weight in zip(train, weights, strict=True)
     ) / total
     return [mean_cost] * len(test), [favorable_rate] * len(test)
 
@@ -254,7 +259,7 @@ def summarize_results(results: dict[str, list[dict[str, Any]]]) -> dict[str, dic
         }
     timing_mae = summary["timing"]["weighted_mae"]
     timing_brier = summary["timing"]["brier"]
-    for name, metrics in summary.items():
+    for metrics in summary.values():
         metrics["weighted_mae_delta_vs_timing"] = metrics["weighted_mae"] - timing_mae
         metrics["brier_delta_vs_timing"] = metrics["brier"] - timing_brier
     return summary
