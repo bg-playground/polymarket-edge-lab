@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from polymarket_edge_lab.shadow.events import EventEnvelope
 
@@ -32,7 +32,9 @@ class AppendOnlyEventStore:
             if not isinstance(value, int):
                 raise ValueError("event record sequence must be an integer")
             if value != sequence:
-                raise ValueError(f"non-contiguous append-only sequence at {value}, expected {sequence}")
+                raise ValueError(
+                    f"non-contiguous append-only sequence at {value}, expected {sequence}"
+                )
             sequence += 1
         return sequence
 
