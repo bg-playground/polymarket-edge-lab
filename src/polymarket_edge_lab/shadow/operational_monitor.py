@@ -304,9 +304,8 @@ def inspect_frozen_evaluation_log(
         snapshot = source_snapshots.get(source)
         age = snapshot.last_ok_age_seconds if snapshot is not None else None
         if age is None or age > critical_after:
-            poll_alert = (
-                f"{source} has no successful poll in the last {critical_after:.0f} seconds"
-            )
+            critical_seconds = f"{critical_after:.0f}"
+            poll_alert = f"{source} has no successful poll in the last {critical_seconds} seconds"
             alerts.append(poll_alert)
             critical = True
         elif age > degraded_after:
