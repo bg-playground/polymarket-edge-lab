@@ -37,7 +37,7 @@ def _healthy_records(now: datetime) -> list[dict[str, object]]:
         _record(
             0,
             "evaluation_run_start",
-            START,
+            now - timedelta(hours=1),
             {
                 "frozen_evaluation": True,
                 "repository_commit": COMMIT,
