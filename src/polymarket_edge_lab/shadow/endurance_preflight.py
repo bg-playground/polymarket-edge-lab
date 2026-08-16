@@ -114,17 +114,14 @@ def run_event_store_endurance_preflight(
 
     alerts: list[str] = []
     if restart_next_sequence != event_count:
-        alerts.append(
-            f"restart next sequence {restart_next_sequence} != expected {event_count}"
-        )
+        alerts.append(f"restart next sequence {restart_next_sequence} != expected {event_count}")
     if growth_ratio > max_growth_ratio:
         alerts.append(
             f"late/early median append ratio {growth_ratio:.3f} exceeds {max_growth_ratio:.3f}"
         )
     if late_median > max_late_median_ms:
         alerts.append(
-            f"late median append latency {late_median:.3f} ms exceeds "
-            f"{max_late_median_ms:.3f} ms"
+            f"late median append latency {late_median:.3f} ms exceeds {max_late_median_ms:.3f} ms"
         )
 
     return EndurancePreflightReport(
