@@ -304,14 +304,18 @@ def inspect_frozen_evaluation_log(
         snapshot = source_snapshots.get(source)
         age = snapshot.last_ok_age_seconds if snapshot is not None else None
         if age is None or age > critical_after:
-            alerts.append(f"{source} has no successful poll in the last {critical_after:.0f} seconds")
+            alerts.append(
+                f"{source} has no successful poll in the last "
+                f"{critical_after:.0f} seconds"
+            )
             critical = True
         elif age > degraded_after:
             alerts.append(f"{source} successful poll is {age:.1f} seconds old")
             degraded = True
         if snapshot is not None and snapshot.recent_non_ok_count:
             alerts.append(
-                f"{source} has {snapshot.recent_non_ok_count} non-ok health event(s) in the last 5 minutes"
+                f"{source} has {snapshot.recent_non_ok_count} non-ok health event(s) "
+                "in the last 5 minutes"
             )
             degraded = True
 
@@ -329,6 +333,10 @@ def inspect_frozen_evaluation_log(
             degraded = True
 
     status: HealthStatus = "CRITICAL" if critical else "DEGRADED" if degraded else "HEALTHY"
+    evaluation_started_at_text = (
+        evaluation_started_at.isoformat() if evaluation_started_at else None
+    )
+    latest_event_at_text = latest_event_at.isoformat() if latest_event_at else None
     return OperationalMonitorReport(
         schema_version=_SCHEMA_VERSION,
         generated_at=observed_now.isoformat(),
@@ -336,9 +344,9 @@ def inspect_frozen_evaluation_log(
         event_log=str(event_log),
         run_id=run_id,
         repository_commit=repository_commit,
-        evaluation_started_at=(evaluation_started_at.isoformat() if evaluation_started_at else None),
+        evaluation_started_at=evaluation_started_at_text,
         latest_sequence=latest_sequence,
-        latest_event_at=latest_event_at.isoformat() if latest_event_at else None,
+        latest_event_at=latest_event_at_text,
         latest_event_age_seconds=latest_age,
         event_count=event_count,
         event_counts=dict(sorted(event_counts.items())),
@@ -358,11 +366,12 @@ def inspect_frozen_evaluation_log(
 def render_operational_summary(report: OperationalMonitorReport) -> str:
     """Render a compact human-readable operational snapshot."""
     counts = report.event_counts
+    latest_sequence = report.latest_sequence if report.latest_sequence is not None else "unknown"
     lines = [
         f"M4A frozen evaluation: {report.status}",
         f"run_id: {report.run_id or 'unknown'}",
         f"repository_commit: {report.repository_commit or 'unknown'}",
-        f"latest_sequence: {report.latest_sequence if report.latest_sequence is not None else 'unknown'}",
+        f"latest_sequence: {latest_sequence}",
         f"latest_event_age_seconds: "
         f"{report.latest_event_age_seconds:.1f}"
         if report.latest_event_age_seconds is not None
