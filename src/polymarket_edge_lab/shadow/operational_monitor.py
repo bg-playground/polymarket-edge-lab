@@ -245,11 +245,11 @@ def inspect_frozen_evaluation_log(
 
             if event_type == "source_health" and payload is not None and created_at is not None:
                 source = str(payload.get("source") or "unknown")
-                status = str(payload.get("status") or "unknown")
+                source_status = str(payload.get("status") or "unknown")
                 detail_value = payload.get("detail")
                 detail = str(detail_value) if detail_value is not None else None
-                source_last[source] = (created_at, status, detail)
-                if status == "poll_ok":
+                source_last[source] = (created_at, source_status, detail)
+                if source_status == "poll_ok":
                     source_last_ok[source] = created_at
                 elif created_at >= observed_now - _RECENT_WINDOW:
                     source_recent_non_ok[source] += 1
