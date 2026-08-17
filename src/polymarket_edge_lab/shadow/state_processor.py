@@ -52,7 +52,9 @@ def _pair_payload(
         "down_price": str(pair.down_price),
         "pair_cost": str(pair.pair_cost),
         "lag_seconds": pair.lag_seconds,
-        "formed_at_source_timestamp": (pair.formed_at_source_timestamp.astimezone(UTC).isoformat()),
+        "formed_at_source_timestamp": (
+            pair.formed_at_source_timestamp.astimezone(UTC).isoformat()
+        ),
         "formed_at_receive_timestamp": (
             pair.formed_at_receive_timestamp.astimezone(UTC).isoformat()
         ),
@@ -75,17 +77,22 @@ class LiveStateProcessor:
         self._processed_fill_event_ids: set[str] = set()
         self._persisted_pairs: set[tuple[str, int]] = set()
         self._persisted_quarantines: set[str] = set()
+        self._pending_restore_records: list[dict[str, object]] = []
         self._restore()
+        self._read_offset = self.store.end_offset()
 
     def _restore(self) -> None:
         records = list(self.store.iter_records())
         fills: dict[str, NormalizedFill] = {}
+        fill_records: list[dict[str, object]] = []
         applications: list[tuple[str, str]] = []
         for record in records:
             event_type = record.get("event_type")
             payload = record.get("payload")
             if event_type == "normalized_fill" and isinstance(payload, dict):
-                fills[str(record["event_id"])] = NormalizedFill.from_payload(payload)
+                event_id = str(record["event_id"])
+                fills[event_id] = NormalizedFill.from_payload(payload)
+                fill_records.append(record)
             elif event_type == "pair_formation" and isinstance(payload, dict):
                 self._persisted_pairs.add(
                     (str(payload["normalized_fill_event_id"]), int(payload["pair_index"]))
@@ -114,8 +121,17 @@ class LiveStateProcessor:
                 )
             self._processed_fill_event_ids.add(fill_event_id)
 
+        self._pending_restore_records = [
+            record
+            for record in fill_records
+            if str(record["event_id"]) not in self._processed_fill_event_ids
+        ]
+
     def process_pending(self) -> StateProcessResult:
-        records = list(self.store.iter_records())
+        tail_records, next_offset = self.store.read_records_from(self._read_offset)
+        records = self._pending_restore_records + tail_records
+        self._pending_restore_records = []
+        self._read_offset = next_offset
         processed = 0
         pair_count = 0
         quarantine_count = 0
