@@ -67,9 +67,7 @@ def _seed_log(path: Path, event_count: int) -> float:
     started = time.perf_counter()
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         for sequence in range(event_count):
-            line = json.dumps(
-                _seed_record(sequence), sort_keys=True, separators=(",", ":")
-            )
+            line = json.dumps(_seed_record(sequence), sort_keys=True, separators=(",", ":"))
             handle.write(line + "\n")
         handle.flush()
     return time.perf_counter() - started
@@ -145,13 +143,11 @@ def run_runtime_endurance_preflight(
     alerts: list[str] = []
     if p95_cycle_ms > max_p95_cycle_ms:
         alerts.append(
-            f"p95 processing cycle {p95_cycle_ms:.3f} ms exceeds "
-            f"{max_p95_cycle_ms:.3f} ms"
+            f"p95 processing cycle {p95_cycle_ms:.3f} ms exceeds {max_p95_cycle_ms:.3f} ms"
         )
     if observed_max_cycle_ms > max_cycle_ms:
         alerts.append(
-            f"maximum processing cycle {observed_max_cycle_ms:.3f} ms exceeds "
-            f"{max_cycle_ms:.3f} ms"
+            f"maximum processing cycle {observed_max_cycle_ms:.3f} ms exceeds {max_cycle_ms:.3f} ms"
         )
 
     return RuntimeEnduranceReport(
