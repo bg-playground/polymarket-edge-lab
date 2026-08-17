@@ -14,21 +14,34 @@ class AppendOnlyEventStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._next_sequence, self._file_size = self._scan_state()
+        self._next_sequence, self._file_size, self._record_cache = self._scan_state()
 
-    def _scan_state(self) -> tuple[int, int]:
+    def _scan_state(self) -> tuple[int, int, list[dict[str, object]]]:
         sequence = 0
-        for record in self.iter_records():
-            value = record.get("sequence")
-            if not isinstance(value, int):
-                raise ValueError("event record sequence must be an integer")
-            if value != sequence:
-                raise ValueError(
-                    f"non-contiguous append-only sequence at {value}, expected {sequence}"
-                )
-            sequence += 1
+        records: list[dict[str, object]] = []
+        if self.path.exists():
+            with self.path.open("r", encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    text = line.strip()
+                    if not text:
+                        raise ValueError(f"blank event record at line {line_number}")
+                    value = json.loads(text)
+                    if not isinstance(value, dict):
+                        raise ValueError(
+                            f"event record at line {line_number} must be an object"
+                        )
+                    record_sequence = value.get("sequence")
+                    if not isinstance(record_sequence, int):
+                        raise ValueError("event record sequence must be an integer")
+                    if record_sequence != sequence:
+                        raise ValueError(
+                            "non-contiguous append-only sequence at "
+                            f"{record_sequence}, expected {sequence}"
+                        )
+                    records.append(value)
+                    sequence += 1
         size = self.path.stat().st_size if self.path.exists() else 0
-        return sequence, size
+        return sequence, size, records
 
     def _assert_exclusive_writer_state(self) -> None:
         actual_size = self.path.stat().st_size if self.path.exists() else 0
@@ -43,13 +56,15 @@ class AppendOnlyEventStore:
         expected = self._next_sequence
         if event.sequence != expected:
             raise ValueError(f"expected sequence {expected}, got {event.sequence}")
-        line = json.dumps(event.to_record(), sort_keys=True, separators=(",", ":")) + "\n"
+        record = event.to_record()
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(line)
             handle.flush()
             os.fsync(handle.fileno())
         self._next_sequence += 1
         self._file_size = self.path.stat().st_size
+        self._record_cache.append(record)
 
     def next_sequence(self) -> int:
         self._assert_exclusive_writer_state()
@@ -98,14 +113,6 @@ class AppendOnlyEventStore:
         return records, snapshot_end
 
     def iter_records(self) -> Iterator[dict[str, object]]:
-        if not self.path.exists():
-            return
-        with self.path.open("r", encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                text = line.strip()
-                if not text:
-                    raise ValueError(f"blank event record at line {line_number}")
-                value = json.loads(text)
-                if not isinstance(value, dict):
-                    raise ValueError(f"event record at line {line_number} must be an object")
-                yield value
+        """Iterate the validated in-memory record snapshot without reparsing NDJSON."""
+        self._assert_exclusive_writer_state()
+        yield from self._record_cache
