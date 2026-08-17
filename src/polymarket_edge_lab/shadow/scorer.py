@@ -130,11 +130,33 @@ class LiveShadowScorer:
         self.models = load_frozen_models(artifact_dir)
         self._clock = clock
         self._monotonic_clock = monotonic_clock
-        self._scored = self._load_scored_snapshot_ids()
+        self._scored: set[str] = set()
+        self._pending_restore: list[dict[str, object]] = []
+        self._restore()
+        self._read_offset = self.store.end_offset()
+
+    def _restore(self) -> None:
+        records = list(self.store.iter_records())
+        for record in records:
+            if record.get("event_type") != "prediction":
+                continue
+            payload = record.get("payload")
+            if isinstance(payload, dict) and payload.get("feature_snapshot_event_id") is not None:
+                self._scored.add(str(payload["feature_snapshot_event_id"]))
+        self._pending_restore = [
+            record
+            for record in records
+            if record.get("event_type") == "feature_snapshot"
+            and str(record["event_id"]) not in self._scored
+        ]
 
     def process_pending(self) -> list[ShadowScoreResult]:
+        tail_records, next_offset = self.store.read_records_from(self._read_offset)
+        self._read_offset = next_offset
+        records = self._pending_restore + tail_records
+        self._pending_restore = []
         results: list[ShadowScoreResult] = []
-        for record in list(self.store.iter_records()):
+        for record in records:
             if record.get("event_type") != "feature_snapshot":
                 continue
             snapshot_id = str(record["event_id"])
@@ -185,7 +207,9 @@ class LiveShadowScorer:
             model = self.models[name]
             matrix = [
                 [
-                    float(features[feature]) if features.get(feature) is not None else float("nan")
+                    float(features[feature])
+                    if features.get(feature) is not None
+                    else float("nan")
                     for feature in model.features
                 ]
             ]
@@ -247,13 +271,3 @@ class LiveShadowScorer:
             )
         )
         return ShadowScoreResult(str(record["event_id"]), prediction_event_id, score_id)
-
-    def _load_scored_snapshot_ids(self) -> set[str]:
-        result: set[str] = set()
-        for record in self.store.iter_records():
-            if record.get("event_type") != "prediction":
-                continue
-            payload = record.get("payload")
-            if isinstance(payload, dict) and payload.get("feature_snapshot_event_id") is not None:
-                result.add(str(payload["feature_snapshot_event_id"]))
-        return result
