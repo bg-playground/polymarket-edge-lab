@@ -52,9 +52,7 @@ def _pair_payload(
         "down_price": str(pair.down_price),
         "pair_cost": str(pair.pair_cost),
         "lag_seconds": pair.lag_seconds,
-        "formed_at_source_timestamp": (
-            pair.formed_at_source_timestamp.astimezone(UTC).isoformat()
-        ),
+        "formed_at_source_timestamp": (pair.formed_at_source_timestamp.astimezone(UTC).isoformat()),
         "formed_at_receive_timestamp": (
             pair.formed_at_receive_timestamp.astimezone(UTC).isoformat()
         ),
