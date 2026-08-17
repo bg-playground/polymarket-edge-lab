@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bisect import bisect_left, insort_right
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -52,7 +52,10 @@ def _latest_strictly_prior_prediction(
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda record: (_created_at(record), int(str(record["sequence"]))))
+    return max(
+        candidates,
+        key=lambda record: (_created_at(record), int(str(record["sequence"]))),
+    )
 
 
 class ProspectiveOutcomeBinder:
@@ -155,10 +158,9 @@ class ProspectiveOutcomeBinder:
         sort_key = (_created_at(record), int(str(record["sequence"])))
         keys = self._prediction_keys.setdefault(key, [])
         records = self._prediction_records.setdefault(key, [])
-        index = bisect_left(keys, sort_key)
-        if index < len(keys) and keys[index] == sort_key:
-            return
         insertion = bisect_left(keys, sort_key)
+        if insertion < len(keys) and keys[insertion] == sort_key:
+            return
         keys.insert(insertion, sort_key)
         records.insert(insertion, record)
 
