@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -51,7 +52,10 @@ def _latest_strictly_prior_prediction(
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda record: (_created_at(record), int(str(record["sequence"]))))
+    return max(
+        candidates,
+        key=lambda record: (_created_at(record), int(str(record["sequence"]))),
+    )
 
 
 class ProspectiveOutcomeBinder:
@@ -60,14 +64,26 @@ class ProspectiveOutcomeBinder:
     def __init__(self, *, run_id: str, store: AppendOnlyEventStore) -> None:
         self.run_id = run_id
         self.store = store
-        self._processed_pair_event_ids = self._load_processed_pair_ids()
+        self._processed_pair_event_ids: set[str] = set()
+        self._prediction_keys: dict[str, list[tuple[datetime, int]]] = {}
+        self._prediction_records: dict[str, list[dict[str, object]]] = {}
+        self._pending_restore: list[tuple[dict[str, object], dict[str, object] | None]] = []
+        self._restore()
+        self._read_offset = self.store.end_offset()
 
-    def process_pending(self) -> BindingProcessResult:
+    def _restore(self) -> None:
         records = list(self.store.iter_records())
-        labeled = 0
-        bound = 0
-        unbound = 0
         for record in records:
+            if record.get("event_type") != "score_binding":
+                continue
+            payload = record.get("payload")
+            if isinstance(payload, dict) and payload.get("pair_formation_event_id") is not None:
+                self._processed_pair_event_ids.add(str(payload["pair_formation_event_id"]))
+
+        for record in records:
+            if record.get("event_type") == "prediction":
+                self._index_prediction(record)
+                continue
             if record.get("event_type") != "pair_formation":
                 continue
             pair_event_id = str(record["event_id"])
@@ -76,41 +92,125 @@ class ProspectiveOutcomeBinder:
             payload = record.get("payload")
             if not isinstance(payload, dict):
                 raise ValueError("pair_formation payload must be an object")
-            pair_cost = Decimal(str(payload["pair_cost"]))
             formed_at_source = datetime.fromisoformat(
                 str(payload["formed_at_source_timestamp"])
             ).astimezone(UTC)
-            outcome_event_id = self._append_outcome_label(
-                pair_event_id=pair_event_id,
-                payload=payload,
-                pair_cost=pair_cost,
-                created_at=_created_at(record),
-            )
-            labeled += 1
-
-            market_id = str(payload["market_id"])
-            source_second_epoch = int(formed_at_source.timestamp())
             selected = _latest_strictly_prior_prediction(
                 records,
-                market_id=market_id,
-                source_second_epoch=source_second_epoch,
+                market_id=str(payload["market_id"]),
+                source_second_epoch=int(formed_at_source.timestamp()),
                 pair_sequence=int(str(record["sequence"])),
             )
-            self._append_binding(
-                pair_event_id=pair_event_id,
-                outcome_label_event_id=outcome_event_id,
-                market_id=market_id,
-                source_second_epoch=source_second_epoch,
-                selected_prediction=selected,
-                created_at=_created_at(record),
-            )
-            if selected is None:
-                unbound += 1
-            else:
+            self._pending_restore.append((record, selected))
+
+    def process_pending(self) -> BindingProcessResult:
+        tail_records, next_offset = self.store.read_records_from(self._read_offset)
+        self._read_offset = next_offset
+        labeled = 0
+        bound = 0
+        unbound = 0
+
+        for record, selected in self._pending_restore:
+            result = self._process_pair(record, selected)
+            labeled += 1
+            if result:
                 bound += 1
-            self._processed_pair_event_ids.add(pair_event_id)
+            else:
+                unbound += 1
+        self._pending_restore = []
+
+        for record in tail_records:
+            if record.get("event_type") == "prediction":
+                self._index_prediction(record)
+                continue
+            if record.get("event_type") != "pair_formation":
+                continue
+            pair_event_id = str(record["event_id"])
+            if pair_event_id in self._processed_pair_event_ids:
+                continue
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                raise ValueError("pair_formation payload must be an object")
+            formed_at_source = datetime.fromisoformat(
+                str(payload["formed_at_source_timestamp"])
+            ).astimezone(UTC)
+            selected = self._latest_indexed_prediction(
+                market_id=str(payload["market_id"]),
+                source_second_epoch=int(formed_at_source.timestamp()),
+            )
+            result = self._process_pair(record, selected)
+            labeled += 1
+            if result:
+                bound += 1
+            else:
+                unbound += 1
 
         return BindingProcessResult(labeled, bound, unbound)
+
+    def _index_prediction(self, record: dict[str, object]) -> None:
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            return
+        market_id = str(payload.get("market_id") or "")
+        if not market_id or not _prediction_is_eligible(record, market_id):
+            return
+        key = market_id.lower()
+        sort_key = (_created_at(record), int(str(record["sequence"])))
+        keys = self._prediction_keys.setdefault(key, [])
+        records = self._prediction_records.setdefault(key, [])
+        insertion = bisect_left(keys, sort_key)
+        if insertion < len(keys) and keys[insertion] == sort_key:
+            return
+        keys.insert(insertion, sort_key)
+        records.insert(insertion, record)
+
+    def _latest_indexed_prediction(
+        self, *, market_id: str, source_second_epoch: int
+    ) -> dict[str, object] | None:
+        key = market_id.lower()
+        keys = self._prediction_keys.get(key)
+        records = self._prediction_records.get(key)
+        if not keys or not records:
+            return None
+        boundary = datetime.fromtimestamp(source_second_epoch, tz=UTC)
+        index = bisect_left(keys, (boundary, -1)) - 1
+        if index < 0:
+            return None
+        return records[index]
+
+    def _process_pair(
+        self,
+        record: dict[str, object],
+        selected_prediction: dict[str, object] | None,
+    ) -> bool:
+        pair_event_id = str(record["event_id"])
+        if pair_event_id in self._processed_pair_event_ids:
+            return selected_prediction is not None
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("pair_formation payload must be an object")
+        pair_cost = Decimal(str(payload["pair_cost"]))
+        formed_at_source = datetime.fromisoformat(
+            str(payload["formed_at_source_timestamp"])
+        ).astimezone(UTC)
+        outcome_event_id = self._append_outcome_label(
+            pair_event_id=pair_event_id,
+            payload=payload,
+            pair_cost=pair_cost,
+            created_at=_created_at(record),
+        )
+        market_id = str(payload["market_id"])
+        source_second_epoch = int(formed_at_source.timestamp())
+        self._append_binding(
+            pair_event_id=pair_event_id,
+            outcome_label_event_id=outcome_event_id,
+            market_id=market_id,
+            source_second_epoch=source_second_epoch,
+            selected_prediction=selected_prediction,
+            created_at=_created_at(record),
+        )
+        self._processed_pair_event_ids.add(pair_event_id)
+        return selected_prediction is not None
 
     def _append_outcome_label(
         self,
@@ -211,13 +311,3 @@ class ProspectiveOutcomeBinder:
                 },
             )
         )
-
-    def _load_processed_pair_ids(self) -> set[str]:
-        processed: set[str] = set()
-        for record in self.store.iter_records():
-            if record.get("event_type") != "score_binding":
-                continue
-            payload = record.get("payload")
-            if isinstance(payload, dict) and payload.get("pair_formation_event_id") is not None:
-                processed.add(str(payload["pair_formation_event_id"]))
-        return processed
