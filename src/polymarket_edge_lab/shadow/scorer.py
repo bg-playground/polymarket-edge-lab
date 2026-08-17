@@ -207,9 +207,7 @@ class LiveShadowScorer:
             model = self.models[name]
             matrix = [
                 [
-                    float(features[feature])
-                    if features.get(feature) is not None
-                    else float("nan")
+                    float(features[feature]) if features.get(feature) is not None else float("nan")
                     for feature in model.features
                 ]
             ]
