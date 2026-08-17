@@ -5,7 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from polymarket_edge_lab.shadow.binding import ProspectiveOutcomeBinder
-from polymarket_edge_lab.shadow.events import EventEnvelope, NormalizedFill
+from polymarket_edge_lab.shadow.events import EventEnvelope, EventType, NormalizedFill
 from polymarket_edge_lab.shadow.state_processor import LiveStateProcessor
 from polymarket_edge_lab.shadow.store import AppendOnlyEventStore
 
@@ -14,13 +14,19 @@ MARKET_ID = "0xmarket"
 BASE_TIME = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
 
 
-def _append(store: AppendOnlyEventStore, event_type: str, payload: dict[str, object], *, created_at: datetime = BASE_TIME) -> str:
+def _append(
+    store: AppendOnlyEventStore,
+    event_type: EventType,
+    payload: dict[str, object],
+    *,
+    created_at: datetime = BASE_TIME,
+) -> str:
     sequence = store.next_sequence()
     event_id = f"{RUN_ID}:{sequence}"
     store.append(
         EventEnvelope(
             schema_version="m4a-event-v1",
-            event_type=event_type,  # type: ignore[arg-type]
+            event_type=event_type,
             event_id=event_id,
             run_id=RUN_ID,
             sequence=sequence,
@@ -78,6 +84,7 @@ def test_state_processor_steady_state_uses_incremental_tail(tmp_path: Path) -> N
 def test_binder_incremental_index_preserves_strict_prior_boundary(tmp_path: Path) -> None:
     store = AppendOnlyEventStore(tmp_path / "events.ndjson")
     binder = ProspectiveOutcomeBinder(run_id=RUN_ID, store=store)
+    original_iter_records = store.iter_records
     store.iter_records = _unexpected_full_scan  # type: ignore[method-assign, assignment]
     prediction_id = _append(
         store,
@@ -114,14 +121,15 @@ def test_binder_incremental_index_preserves_strict_prior_boundary(tmp_path: Path
 
     result = binder.process_pending()
     bindings = [
-        record for record in store.iter_records.__self__._record_cache  # type: ignore[attr-defined, union-attr]
-        if record.get("event_type") == "score_binding"
+        record for record in original_iter_records() if record.get("event_type") == "score_binding"
     ]
 
     assert result.bound_pair_count == 1
     assert result.unbound_pair_count == 0
     assert len(bindings) == 1
-    assert bindings[0]["payload"]["prediction_event_id"] == prediction_id  # type: ignore[index]
+    payload = bindings[0]["payload"]
+    assert isinstance(payload, dict)
+    assert payload["prediction_event_id"] == prediction_id
 
 
 def test_binder_excludes_exact_source_second_prediction(tmp_path: Path) -> None:
