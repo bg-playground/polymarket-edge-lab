@@ -27,9 +27,7 @@ class AppendOnlyEventStore:
                         raise ValueError(f"blank event record at line {line_number}")
                     value = json.loads(text)
                     if not isinstance(value, dict):
-                        raise ValueError(
-                            f"event record at line {line_number} must be an object"
-                        )
+                        raise ValueError(f"event record at line {line_number} must be an object")
                     record_sequence = value.get("sequence")
                     if not isinstance(record_sequence, int):
                         raise ValueError("event record sequence must be an integer")
